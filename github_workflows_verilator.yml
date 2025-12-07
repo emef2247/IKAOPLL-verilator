@@ -1,0 +1,37 @@
+name: Verilator build & run
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make g++ git pkg-config verilator
+
+      - name: Build Verilator model
+        run: |
+          chmod +x build_and_run_vltb.sh
+          ./build_and_run_vltb.sh
+
+      - name: Run simulation (short)
+        run: |
+          # Run a short sim to exercise the model; adjust args as needed
+          ./obj_dir/VIKAOPLL_vltb 2000000 3579545 44100 ym2413_scale_chromatic.delta.csv 1024 || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: verilator-artifacts
+          path: |
+            obj_dir/
+            dump.vcd
+            out_from_vgm.wav

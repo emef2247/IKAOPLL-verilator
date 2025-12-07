@@ -1,0 +1,74 @@
+# Build / Verilator outputs
+obj_dir/
+build/
+*.o
+*.a
+*.so
+*.d
+*.exe
+*.out
+*.elf
+
+# Verilator / simulation artifacts
+dump.vcd
+*.vcd
+*.vpd
+*.fst
+*.wfm
+
+# Wave / audio outputs & logs
+*.wav
+*.pcm
+*.raw
+out_from_*.wav
+out_from_sim.wav
+run_*.log
+*.log
+
+# GTKWave and GUI artifacts
+*.gtkw
+*.save
+
+# Editor / OS / misc
+*.swp
+*~
+*.bak
+*.tmp
+.DS_Store
+Thumbs.db
+
+# IDE/editor dirs
+.vscode/
+.idea/
+*.iml
+
+# Python virtualenv / caches
+__pycache__/
+*.py[cod]
+env/
+venv/
+
+# Other generated files (examples)
+*.gz
+*.lz4
+
+# Protect large csvs only if you generate them locally (optional)
+# ym2413_scale_chromatic.delta.csv
+# ym2413_scale_chromatic.vgm.csv
+
+# If you want to ignore the verifier C++ build results:
+# obj_dir/**
+
+# Keep the following source files tracked:
+# src/*.v
+# tb/*.cpp# build artifacts
+iverilog/
+obj_dir/
+*.vvp
+dump.vcd
+*.o
+*.log
+*.wav
+iverilog/*.vvp
+iverilog/*.wav
+iverilog/*.txt

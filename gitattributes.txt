@@ -1,0 +1,6 @@
+# Keep line endings consistent
+*.v text eol=lf
+*.sv text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.sh text eol=lf
