@@ -1,14 +1,16 @@
-// IKAOPLL_reg_wrapper.v (cleaned async-sampler version)
-// - Async sampler captures A0/D on negedge CS or negedge WR (when CS low).
-// - Sample is synchronized to EMUCLK and stretched for STRETCH_PHI1_WINDOWS phi1 windows.
-// - Debug prints removed; parameters set to conservative defaults.
+`timescale 10ps/10ps
+// IKAOPLL_reg_wrapper.v (async-sampler + robust busy/done FSM with bus-sample-triggered pending)
+//
+// This wrapper samples CPU bus asynchronously, synchronizes & stretches to phi1 windows,
+// and exposes non-invasive monitor signals. The busy/done generator below uses
+// explicit edge detection + bus-sample trigger to guarantee exactly one WRITE_DONE per data write.
 
 module IKAOPLL_reg_wrapper #(
     parameter FULLY_SYNCHRONOUS = 1,
     parameter ALTPATCH_CONFIG_MODE = 0,
     parameter INSTROM_STYLE = 0,
-    parameter integer POST_RESET_HOLD_CYCLES = 4,   // default hold after reset
-    parameter integer STRETCH_PHI1_WINDOWS = 2     // default stretch length
+    parameter integer POST_RESET_HOLD_CYCLES = 4,
+    parameter integer STRETCH_PHI1_WINDOWS = 2
 )(
     input  wire           i_EMUCLK,
     input  wire           i_phiM_PCEN_n,
@@ -67,7 +69,60 @@ module IKAOPLL_reg_wrapper #(
     wire core_o_ADDRREG_WRRQ;
     wire core_o_DATAREG_WRRQ;
 
-    // ---------- post-reset hold ----------
+    // =========================================================================
+    // busy / write-done generator (edge-detection + bus-sample trigger)
+    // - pending_write is set when either:
+    //     * we observe a DATAREG_WRRQ rising edge from core, or
+    //     * wrapper's own bus-sampler captures a data write (latched_a0 == 1)
+    // - when queued_n rises (0->1) and pending_write is set, emit single-cycle WRITE_DONE and clear pending.
+    // - BUSY asserted while queued_n==0 or while pending_write == 1.
+    // =========================================================================
+
+    reg datawrq_prev;
+    reg queued_prev;
+    reg pending_write;
+    reg write_done_reg;
+    reg busy_reg;
+
+    always @(posedge i_EMUCLK) begin
+        if (!i_RST_n) begin
+            datawrq_prev <= 1'b0;
+            queued_prev <= 1'b1; // assume idle
+            pending_write <= 1'b0;
+            write_done_reg <= 1'b0;
+            busy_reg <= 1'b0;
+        end else begin
+            // default clear single-cycle pulse
+            write_done_reg <= 1'b0;
+
+            // detect DATAREG_WRRQ rising edge from core (safety)
+            if (core_o_DATAREG_WRRQ & ~datawrq_prev) begin
+                pending_write <= 1'b1;
+            end
+
+            // queued rising edge detection (0 -> 1)
+            if ((core_o_D9REG_WRDATA_QUEUED_N == 1'b1) && (queued_prev == 1'b0)) begin
+                if (pending_write) begin
+                    // consume pending and produce one-shot WRITE_DONE
+                    write_done_reg <= 1'b1;
+                    pending_write <= 1'b0;
+                end
+            end
+
+            // busy: true while queued is active (0) or while we have a pending write waiting to complete
+            busy_reg <= (~core_o_D9REG_WRDATA_QUEUED_N) | pending_write;
+
+            // update previous samples
+            datawrq_prev <= core_o_DATAREG_WRRQ;
+            queued_prev <= core_o_D9REG_WRDATA_QUEUED_N;
+        end
+    end
+
+    // =========================================================================
+    // post-reset hold, async sampler, stretch & core input steering
+    // =========================================================================
+
+    // post-reset hold counter
     reg [15:0] post_reset_hold_cnt;
     always @(posedge i_EMUCLK) begin
         if (!i_RST_n) post_reset_hold_cnt <= POST_RESET_HOLD_CYCLES;
@@ -75,12 +130,11 @@ module IKAOPLL_reg_wrapper #(
     end
     wire hold_active = (post_reset_hold_cnt != 0);
 
-    // ---------- asynchronous sampler ----------
+    // async sampler
     reg        sampled_valid_async;
     reg        sampled_a0_async;
     reg [7:0]  sampled_d_async;
 
-    // Capture on negedge CS or negedge WR (when CS low)
     always @(negedge i_CS_n or negedge i_WR_n or posedge i_RST_n) begin
         if (i_RST_n == 1'b0) begin
             sampled_valid_async <= 1'b0;
@@ -99,7 +153,7 @@ module IKAOPLL_reg_wrapper #(
         end
     end
 
-    // ---------- synchronize sample into EMUCLK domain & stretch ----------
+    // synchronize sample & stretch; also set pending_write when we capture a data write
     reg latched_valid;
     reg latched_a0;
     reg [7:0] latched_d;
@@ -112,12 +166,17 @@ module IKAOPLL_reg_wrapper #(
             latched_d     <= 8'h00;
             stretch_cnt   <= 0;
             sampled_valid_async <= 1'b0;
+            // note: do not alter pending_write here (preserve state across reset handling above)
         end else begin
             if (!hold_active && sampled_valid_async && !latched_valid) begin
                 latched_a0 <= sampled_a0_async;
                 latched_d  <= sampled_d_async;
                 latched_valid <= 1'b1;
                 if (stretch_cnt == 0) stretch_cnt <= STRETCH_PHI1_WINDOWS;
+                // IMPORTANT: when our sampler captures a DATA write (A0==1), set pending_write here.
+                if (sampled_a0_async == 1'b1) begin
+                    pending_write <= 1'b1;
+                end
                 sampled_valid_async <= 1'b0;
             end
 
@@ -127,13 +186,13 @@ module IKAOPLL_reg_wrapper #(
         end
     end
 
-    // ---------- core inputs priority: hold_active > stretch(latched) > direct ----------
+    // core input priority: hold_active > stretch(latched) > direct
     wire core_i_CS_n  = hold_active ? 1'b1 : (stretch_cnt != 0 ? 1'b0 : i_CS_n);
     wire core_i_WR_n  = hold_active ? 1'b1 : (stretch_cnt != 0 ? 1'b0 : i_WR_n);
     wire core_i_A0    = hold_active ? 1'b0 : (stretch_cnt != 0 ? latched_a0 : i_A0);
     wire [7:0] core_i_D = hold_active ? 8'h00 : (stretch_cnt != 0 ? latched_d : i_D);
 
-    // ---------- instantiate core (named ports) ----------
+    // instantiate core (named ports)
     IKAOPLL_reg #(
         .FULLY_SYNCHRONOUS(FULLY_SYNCHRONOUS),
         .ALTPATCH_CONFIG_MODE(ALTPATCH_CONFIG_MODE),
@@ -197,7 +256,7 @@ module IKAOPLL_reg_wrapper #(
         .o_DATAREG_WRRQ(core_o_DATAREG_WRRQ)
     );
 
-    // ---------- pass-through outputs ----------
+    // pass-through outputs
     assign o_D = core_o_D;
     assign o_D_OE = core_o_D_OE;
     assign o_TEST = core_o_TEST;
@@ -215,7 +274,8 @@ module IKAOPLL_reg_wrapper #(
     assign o_ADDRREG_WRRQ          = core_o_ADDRREG_WRRQ;
     assign o_DATAREG_WRRQ          = core_o_DATAREG_WRRQ;
 
-    // Fallback FSM and write-done logic: kept as in previous wrapper (unchanged in repo).
-    // (If you want, I can include the exact FSM body here as well.)
+    // expose busy/done
+    assign o_BUSY = busy_reg;
+    assign o_WRITE_DONE = write_done_reg;
 
 endmodule
