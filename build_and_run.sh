@@ -27,12 +27,15 @@ printf '  %s\n' "${RTL_SOURCES[@]}"
 verilator \
   --cc \
   --exe \
+  --trace \
   --Wno-PINCONNECTEMPTY \
   --Wno-DECLFILENAME \
   --Wno-UNUSED \
   --Wno-WIDTH \
   "${RTL_SOURCES[@]}" \
   "${SRC_DIR}/ikaopll_wrapper.cpp" \
+  "${SRC_DIR}/ym2413_bus.c" \
+  "${SRC_DIR}/vgm_player.c" \
   "${SRC_DIR}/main_vgm_csv.c" \
   -CFLAGS "-O2" \
   -o ikaopll_sim
@@ -41,7 +44,8 @@ verilator \
 make -C obj_dir -f VIKAOPLL.mk ikaopll_sim
 
 echo "Running simulation..."
-./obj_dir/ikaopll_sim
+# カレントディレクトリをプロジェクトルートに戻してから実行
+cd "${ROOT_DIR}"
+./build/obj_dir/ikaopll_sim
 
 echo "Done."
-
