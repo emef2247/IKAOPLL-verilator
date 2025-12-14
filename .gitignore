@@ -1,0 +1,19 @@
+# Verilator build artifacts
+obj_dir/
+*.vcd
+*.fst
+
+# Local build directory
+build/
+
+# Editor/OS files
+*.swp
+*~
+.DS_Store
+
+# CMake / Make artifacts (if used later)
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
