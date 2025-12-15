@@ -56,7 +56,7 @@ void ikaopll_set_A0(uint8_t v);
 void ikaopll_set_D(uint8_t v);
 
 /*-------------------------------------------------------------------------
- * 出力取得（ACC / MO）
+ * 出力取得（ACC / MO / STRB）
  *------------------------------------------------------------------------*/
 
 /* o_ACC_SIGNED を取得する（16bit signed） */
@@ -64,6 +64,12 @@ int16_t ikaopll_get_acc_signed(void);
 
 /* o_IMP_FLUC_SIGNED_MO を取得する（10bit signed 相当だが 16bit に拡張） */
 int16_t ikaopll_get_mo_signed(void);
+
+/* o_DAC_EN_MO を取得する（Mo サンプル有効時に 1） */
+uint8_t ikaopll_get_dac_en_mo(void);
+
+/* o_ACC_SIGNED_STRB を取得する（ACC 出力更新ストローブ） */
+uint8_t ikaopll_get_acc_strb(void);
 
 #ifdef __cplusplus
 }
