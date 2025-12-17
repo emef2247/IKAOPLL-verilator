@@ -6,33 +6,6 @@
 #include "ikaopll_wrapper.h"
 #include "ym2413_bus.h"
 #include "vgm_player.h"
-// #include "wav_writer.h"   /* いったん WAV 生成は使わない */
-
-/* 将来の WAV 出力用に残しておくが、今は使わない */
-#if 0
-#define MAX_ACC_SAMPLES  (10 * 44100)  /* 最大 10 秒分くらいのバッファ */
-
-/* VGM 再生後に ACC_STRB を見ながら ACC_SIGNED を収集する（実験用） */
-static size_t capture_acc_stream(ym2413_bus_t* bus, int16_t* out, size_t max_samples)
-{
-    size_t count = 0;
-    int    timeout_phiM = 0;
-
-    while (count < max_samples && timeout_phiM < 2000000) {
-        /* φM を 1 カウント進める */
-        ym2413_bus_step_phiM_cycles(bus, 1);
-        timeout_phiM++;
-
-        /* ACC_STRB が立っていれば ACC_SIGNED をサンプル */
-        if (ikaopll_get_acc_strb()) {
-            out[count++] = ikaopll_get_acc_signed();
-        }
-    }
-
-    printf("[main] captured %zu ACC samples (timeout_phiM=%d)\n", count, timeout_phiM);
-    return count;
-}
-#endif
 
 int main(int argc, char** argv)
 {
@@ -60,19 +33,27 @@ int main(int argc, char** argv)
     ym2413_bus_t bus;
     ym2413_bus_init(&bus);
 
+    /* ACC / Mo ログ開始 */
+    ym2413_bus_acc_log_open("acc_log.csv");
+    ym2413_bus_mo_log_open("mo_log.csv");
+
     /* VGM CSV を読み込んでシーケンスを実行 */
     if (vgm_player_run_csv(csv_path, &bus) != 0) {
         fprintf(stderr, "[main] vgm_player_run_csv failed.\n");
+        ym2413_bus_mo_log_close();
+        ym2413_bus_acc_log_close();
         ikaopll_trace_close();
         ikaopll_release();
         return 1;
     }
 
-    /* ★ ここで追加シミュレーションは行わない（ACC キャプチャ無し） */
+    /* ログ終了 */
+    ym2413_bus_mo_log_close();
+    ym2413_bus_acc_log_close();
 
     /* g_main_time は 1ps 単位の tick 数 */
     uint64_t sim_ticks = ikaopll_get_sim_time();
-    double   sim_sec   = sim_ticks * 1e-12;  /* 1ps * ticks */
+    double   sim_sec   = sim_ticks * 1e-12;
 
     printf("Simulation finished. sim_time = %" PRIu64 " ticks (%.6f s)\n",
            sim_ticks, sim_sec);

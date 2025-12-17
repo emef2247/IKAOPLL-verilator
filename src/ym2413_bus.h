@@ -44,5 +44,12 @@ void ym2413_bus_write_addr(ym2413_bus_t* bus, uint8_t addr);
 /* データ書き込み（WAIT 管理込み、TB の IKAOPLL_write(DATA) 相当） */
 void ym2413_bus_write_data(ym2413_bus_t* bus, uint8_t data);
 
-#endif /* YM2413_BUS_H */
+/* ACC ログ制御（任意） */
+void ym2413_bus_acc_log_open(const char* path);
+void ym2413_bus_acc_log_close(void);
 
+/* Mo ログ制御（任意） */
+void ym2413_bus_mo_log_open(const char* path);
+void ym2413_bus_mo_log_close(void);
+
+#endif /* YM2413_BUS_H */
