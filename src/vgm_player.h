@@ -19,5 +19,16 @@ typedef struct {
 */
 int vgm_player_run_csv(const char* path, ym2413_bus_t* bus);
 
-#endif /* VGM_PLAYER_H */
+/* Parse a VGM file directly and feed the resulting register/address events
+ * into ym2413_bus (same semantics as vgm_player_run_csv). This function
+ * uses the VGM parser (vgm_player_vgm) to read VGM opcodes, convert wait
+ * samples to φM counts and call ym2413_bus_* functions accordingly.
+ *
+ * - path: path to input .vgm
+ * - bus : initialized ym2413_bus_t
+ *
+ * Returns 0 on success, non-zero on error.
+ */
+int vgm_player_run_vgm(const char* path, ym2413_bus_t* bus);
 
+#endif /* VGM_PLAYER_H */

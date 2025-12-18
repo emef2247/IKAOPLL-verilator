@@ -13,15 +13,21 @@
  Minimal runtime flag support:
   - --vcd [filename]   : enable VCD output, optional filename (default: ikaopll_dump.vcd)
   - --no-csv           : disable ACC / Mo CSV logging (default: enabled)
-  Other args preserved: first non-option argument is treated as CSV path.
+  Other args preserved: first non-option argument is treated as CSV or VGM path.
 */
 
 static void print_usage(const char *progname)
 {
-    printf("Usage: %s [vgm_csv_path] [--vcd [vcd_file]] [--no-csv]\n", progname);
-    printf("  If vgm_csv_path is omitted, default vgm_data/tests/ym2413_scale_chromatic.vgm.csv is used.\n");
+    printf("Usage: %s [vgm_csv_or_vgm_path] [--vcd [vcd_file]] [--no-csv]\n", progname);
+    printf("  If path is omitted, default vgm_data/tests/ym2413_scale_chromatic.vgm.csv is used.\n");
     printf("  --vcd [file]   : enable VCD output; optional filename (default: ikaopll_dump.vcd)\n");
     printf("  --no-csv       : disable ACC/Mo CSV log output\n");
+}
+
+static bool has_vgm_extension_or_none(const char *p_filename) {
+    size_t len = strlen(p_filename);
+    if (len > 4 && strcasecmp(p_filename + len - 4, ".vgm") == 0) return true;
+    return false;
 }
 
 int main(int argc, char** argv)
@@ -50,13 +56,13 @@ int main(int argc, char** argv)
             /* unknown option: ignore or extend as needed */
             fprintf(stderr, "Warning: unknown option '%s' (ignored)\n", argv[i]);
         } else {
-            /* first non-option token treated as csv path */
+            /* first non-option token treated as csv or vgm path */
             csv_path = argv[i];
         }
     }
 
     printf("IKAOPLL-verilator: YM2413 bus + VGM CSV player\n");
-    printf("  CSV: %s\n", csv_path);
+    printf("  Input: %s\n", csv_path);
     if (enable_vcd) {
         printf("  VCD: enabled -> %s\n", vcd_filename);
     } else {
@@ -88,10 +94,18 @@ int main(int argc, char** argv)
         ym2413_bus_mo_log_open("mo_log.csv");
     }
 
-    /* VGM CSV を読み込んでシーケンスを実行 */
-    int rv = vgm_player_run_csv(csv_path, &bus);
+    /* VGM CSV または VGM を読み込んでシーケンスを実行 */
+    int rv = 0;
+    if (has_vgm_extension_or_none(csv_path)) {
+        /* Input ends with .vgm -> parse VGM directly */
+        rv = vgm_player_run_vgm(csv_path, &bus);
+    } else {
+        /* Treat as CSV */
+        rv = vgm_player_run_csv(csv_path, &bus);
+    }
+
     if (rv != 0) {
-        fprintf(stderr, "[main] vgm_player_run_csv failed.\n");
+        fprintf(stderr, "[main] vgm_player run failed.\n");
         if (enable_csv) {
             ym2413_bus_mo_log_close();
             ym2413_bus_acc_log_close();
