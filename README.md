@@ -20,7 +20,7 @@ Verilator を使った軽量な IKAOPLL (YM2413相当) のシミュレーショ�
 - build/ — ビルド出力（obj_dir）
 - build_and_run.sh — デフォルトのビルド＋実行スクリプト（デフォルトで VCD は出さない）
 - build_and_run_debug.sh — `build_and_run.sh` をベースに最小差分で `--trace` ビルドしたもの。VCD の ON/OFF は実行時のフラグで制御します
-- vgm_data/ — サンプル VGM/CSV（テスト用）
+- tests/ — テスト用 VGM/CSV/MML
 - tools/ — 補助スクリプト
 
 ## ビルドと実行
@@ -31,18 +31,18 @@ VCD（波形ダンプ）あり/なしのフローを分けて扱うため、2 �
 - 目的：波形を出力しない通常のバッチ実行／WAV 出力の確認など
 - 実行例：
   ```
-  ./build_and_run.sh vgm_data/tests/ym2413_scale_chromatic.vgm.csv
+  ./build_and_run.sh tests/csv/ym2413_scale_chromatic.vgm.csv
   ```
 
 2) デバッグ（trace 有効でビルド、VCD は実行時で制御）
 - 目的：trace（VCD）を取りたい場合に使う。ビルド自体は `--trace` を付けて行うが、VCD の実際の生成は実行時フラグで切り替えます。
 - 実行例（trace ビルドのみ、VCD は出さない）：
   ```
-  ./build_and_run_debug.sh vgm_data/tests/ym2413_scale_chromatic.vgm.csv
+  ./build_and_run_debug.sh tests/csv/ym2413_scale_chromatic.vgm.csv
   ```
 - 実行例（trace ビルドして VCD を出す）：
   ```
-  ./build_and_run_debug.sh vgm_data/tests/ym2413_scale_chromatic.vgm.csv --vcd mytrace.vcd
+  ./build_and_run_debug.sh tests/csv/ym2413_scale_chromatic.vgm.csv --vcd mytrace.vcd
   ```
 - 実行時に使える主なフラグ（`main_vgm_csv.c` による）：
   - `--vcd [filename]` — VCD を有効にする（省略時は `ikaopll_dump.vcd`）
@@ -55,19 +55,19 @@ VCD（波形ダンプ）あり/なしのフローを分けて扱うため、2 �
 1. VCD を使わない高速確認（推奨）
    ```
    rm -rf build/obj_dir
-   ./build_and_run.sh vgm_data/tests/ym2413_scale_chromatic.vgm.csv
+   ./build_and_run.sh tests/csv/ym2413_scale_chromatic.vgm.csv
    ```
 
 2. trace ビルドのみ（VCD は出さない）
    ```
    rm -rf build/obj_dir
-   ./build_and_run_debug.sh vgm_data/tests/ym2413_scale_chromatic.vgm.csv
+   ./build_and_run_debug.sh tests/csv/ym2413_scale_chromatic.vgm.csv
    ```
 
 3. trace ビルドして VCD を生成
    ```
    rm -rf build/obj_dir
-   ./build_and_run_debug.sh vgm_data/tests/ym2413_scale_chromatic.vgm.csv --vcd mytrace.vcd
+   ./build_and_run_debug.sh tests/csv/ym2413_scale_chromatic.vgm.csv --vcd mytrace.vcd
    ```
 
 ## ライセンス / 謝辞

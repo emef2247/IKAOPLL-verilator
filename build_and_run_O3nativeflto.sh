@@ -38,7 +38,7 @@ verilator \
   "${SRC_DIR}/vgm_player.c" \
   "${SRC_DIR}/wav_writer.c" \
   "${SRC_DIR}/main_vgm_csv.c" \
-  -CFLAGS "-O2" \
+  -CFLAGS "-O3 -march=native -flto" \
   -o ikaopll_sim
 
 # Build using generated Makefile
