@@ -3,29 +3,10 @@
  *
  * YM2413 バス制御 / φM クロック模倣 / ACC & Mo ログ取得 + 定期オーディオサンプリング出力 (CSV)
  *
- * 概要:
- * - 既存の mo ログ（立ち上がりのデバウンス + cluster 内 peak 選択）は維持します。
- * - 追加: "定期サンプリング" を行い、オーディオ用の CSV (t_ps, mo_signed, acc_signed) を出力します。
- *   → ポストプロセスで WAV 化する際に十分な情報を残します。
+ * ここにデバッグ用ログ出力（各 write_addr/write_data 呼び出しのタイムスタンプ等）を追加しています。
+ * また adapter / internal の phiM 増分を分離してカウントするためのインストルメンテーションを導入しました。
  *
- * 動作:
- * - デフォルトのサンプルレートは 44100 Hz (AUDIO_SAMPLE_RATE マクロ)。必要なら変更して再ビルドしてください。
- * - サンプリングは「シミュレーション時刻 (ps)」を基準に行います。サンプル時刻を越えたら ikaopll の現在の
- *   mo_signed / acc_signed を取得して CSV に出力します。
- *
- * 設計方針:
- * - VCD 出力は引き続き行う運用を想定。シミュレーションが大きい場合でも、CSV を出力しておけばポスト処理は
- *   そこから行えます。
- * - まずは CSV 出力で確実な確認を行い、必要なら C 側で直接 WAV 出力（wav_writer を使う等）に拡張可能です。
- *
- * 使い方:
- * - デフォルトで audio_samples.csv を出力します (ym2413_bus_init 時にファイルを開きます)。
- * - 出力ファイルを変更したければ ym2413_bus_audio_log_open() を呼ぶ実装を追加しても良いです。
- *
- * 注意:
- * - 出力する mo 値は ikaopll_get_mo_signed() の生の signed 値 (おおむね 10bit 方向) です。
- * - ACC 値は ikaopll_get_acc_signed() の生データ (16bit) です。
- *
+ * 既存コメント・説明は可能な限り維持しています。
  */
 
 #include "ym2413_bus.h"
@@ -35,6 +16,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <math.h>
+#include <limits.h>
+#include <string.h>
 
 /* 設定: オーディオサンプルレート (Hz) */
 #ifndef AUDIO_SAMPLE_RATE
@@ -46,6 +29,12 @@
 #define MO_LOG_DEBOUNCE_PS 2500000ULL
 #endif
 
+/* Conversion constant for approx samples from phiM (same as used elsewhere) */
+static const double k_EMUCLK_HZ = 3579545.0;
+static const double k_VGM_RATE = 44100.0;
+static const double k_EMU_PER_SAMPLE = 3579545.0 / 44100.0;
+static const double k_PHIM_PER_SAMPLE_D = k_EMU_PER_SAMPLE / 4.0; /* ≒20.3 */
+
 /*=========================================================================
  * グローバル / 状態変数 (先に宣言しておく)
  *=========================================================================*/
@@ -54,7 +43,7 @@
 static FILE*    g_acc_log_fp    = NULL;
 static uint64_t g_acc_log_count = 0;
 
-/* Mo ログ (立ち上がり cluster -> peak 出力) */
+/* Mo ログ (立ち上がりのデバウンス + cluster 内 peak 選択) */
 static FILE*    g_mo_log_fp    = NULL;
 static uint64_t g_mo_log_count = 0;
 
@@ -74,6 +63,25 @@ static uint64_t g_cluster_last_edge_tps = 0ULL;
 static uint64_t g_audio_sample_period_ps = 0ULL;   /* ps 単位のサンプル周期 */
 static uint64_t g_audio_next_sample_tps = 0ULL;    /* 次サンプルのシミュ時刻 (ps) */
 static int32_t  g_last_acc_signed = 0;             /* ACC の最新値（サンプリングで使うためにキャッシュ） */
+
+/* -------------------------------------------------------------------------
+ * Debugging / bus access logging state
+ * -------------------------------------------------------------------------*/
+static FILE*    g_debug_fp = NULL;
+static uint64_t g_bus_access_count = 0;          /* number of write_* calls logged */
+static uint64_t g_bus_total_bytes = 0;           /* total bytes written (addr/data each count as 1) */
+static uint64_t g_bus_last_access_phiM = 0;      /* phiM at last logged access */
+static uint64_t g_bus_min_duration = UINT64_MAX;
+static uint64_t g_bus_max_duration = 0;
+static uint64_t g_bus_total_duration = 0;       /* sum of durations (phiM) */
+
+/* -------------------------------------------------------------------------
+ * New: phiM totals and adapter/internal split
+ * -------------------------------------------------------------------------*/
+static uint64_t g_debug_total_phiM = 0;                /* total phiM increments observed */
+static uint64_t g_debug_total_phiM_adapter = 0;        /* increments attributed to adapter calls */
+static uint64_t g_debug_total_phiM_internal = 0;       /* increments attributed to internal waits */
+static int      g_debug_flag_current_step_from_adapter = 0; /* set by adapter wrapper */
 
 /*=========================================================================
  * 内部ヘルパ: cluster を出力してクリア
@@ -95,6 +103,7 @@ static void ym2413_bus_emit_cluster_if_active(void)
 
 /*=========================================================================
  * EMUCLK / phiM 周りのユーティリティ (従来ロジックを保持)
+ * ただし phiM カウント増分の際にデバッグ用カウンタを増やす処理を追加
  *=========================================================================*/
 static void ym2413_bus_step_emuclk_1cycle(ym2413_bus_t* bus)
 {
@@ -114,6 +123,14 @@ static void ym2413_bus_step_emuclk_1cycle(ym2413_bus_t* bus)
 
     if (bus->phiMref) {
         bus->phiM_cnt += 1;
+
+        /* instrumentation: attribute this increment */
+        g_debug_total_phiM += 1;
+        if (g_debug_flag_current_step_from_adapter) {
+            g_debug_total_phiM_adapter += 1;
+        } else {
+            g_debug_total_phiM_internal += 1;
+        }
     }
 
     ikaopll_step_emuclk_negedge();
@@ -137,6 +154,14 @@ static void ym2413_bus_step_emuclk_posedge_only(ym2413_bus_t* bus)
 
     if (bus->phiMref) {
         bus->phiM_cnt += 1;
+
+        /* instrumentation */
+        g_debug_total_phiM += 1;
+        if (g_debug_flag_current_step_from_adapter) {
+            g_debug_total_phiM_adapter += 1;
+        } else {
+            g_debug_total_phiM_internal += 1;
+        }
     }
 }
 
@@ -240,8 +265,6 @@ void ym2413_bus_mo_log_close(void)
 
 /*=========================================================================
  * オーディオ CSV 出力の open/close
- * - デフォルトで audio_samples.csv を出すようにしています。
- * - フォーマット: t_ps,mo_signed,acc_signed
  *=========================================================================*/
 void ym2413_bus_audio_log_open(const char* path)
 {
@@ -266,6 +289,66 @@ void ym2413_bus_audio_log_close(void)
         g_audio_fp = NULL;
     }
 }
+
+/*=========================================================================
+ * Debug log open/close + getters (extended)
+ *=========================================================================*/
+void ym2413_bus_debug_open(const char* path)
+{
+    if (g_debug_fp) return;
+    if (!path) path = "ym2413_bus_calls.log";
+    g_debug_fp = fopen(path, "w");
+    if (!g_debug_fp) {
+        fprintf(stderr, "[ym2413_bus] failed to open debug log: %s\n", path);
+        g_debug_fp = NULL;
+        return;
+    }
+    /* header */
+    fprintf(g_debug_fp, "access_idx,phiM_cnt,delta_phiM,approx_samples,op,value_hex\n");
+    fflush(g_debug_fp);
+    /* reset counters */
+    g_bus_access_count = 0;
+    g_bus_total_bytes = 0;
+    g_bus_last_access_phiM = 0;
+    g_bus_min_duration = UINT64_MAX;
+    g_bus_max_duration = 0;
+    g_bus_total_duration = 0;
+
+    /* reset phiM instrumentation */
+    g_debug_total_phiM = 0;
+    g_debug_total_phiM_adapter = 0;
+    g_debug_total_phiM_internal = 0;
+    g_debug_flag_current_step_from_adapter = 0;
+}
+
+void ym2413_bus_debug_close(void)
+{
+    if (g_debug_fp) {
+        fclose(g_debug_fp);
+        g_debug_fp = NULL;
+    }
+    /* print summary to stderr for convenience */
+    fprintf(stderr, "[ym2413_bus] debug summary: accesses=%" PRIu64 ", total_bytes=%" PRIu64
+            ", min_dphiM=%" PRIu64 ", max_dphiM=%" PRIu64 ", total_dphiM=%" PRIu64 "\n",
+            g_bus_access_count,
+            g_bus_total_bytes,
+            (g_bus_min_duration==UINT64_MAX?0:g_bus_min_duration),
+            g_bus_max_duration,
+            g_bus_total_duration);
+
+    fprintf(stderr, "[ym2413_bus] phiM totals: total=%" PRIu64 ", adapter=%" PRIu64 ", internal=%" PRIu64 "\n",
+            g_debug_total_phiM, g_debug_total_phiM_adapter, g_debug_total_phiM_internal);
+}
+
+uint64_t ym2413_bus_debug_get_access_count(void) { return g_bus_access_count; }
+uint64_t ym2413_bus_debug_get_total_bytes(void) { return g_bus_total_bytes; }
+uint64_t ym2413_bus_debug_get_min_duration_phiM(void) { return (g_bus_min_duration==UINT64_MAX?0:g_bus_min_duration); }
+uint64_t ym2413_bus_debug_get_max_duration_phiM(void) { return g_bus_max_duration; }
+uint64_t ym2413_bus_debug_get_total_duration_phiM(void) { return g_bus_total_duration; }
+
+uint64_t ym2413_bus_debug_get_total_phiM(void) { return g_debug_total_phiM; }
+uint64_t ym2413_bus_debug_get_total_phiM_adapter(void) { return g_debug_total_phiM_adapter; }
+uint64_t ym2413_bus_debug_get_total_phiM_internal(void) { return g_debug_total_phiM_internal; }
 
 /*=========================================================================
  * 公開 API: init
@@ -304,10 +387,25 @@ void ym2413_bus_init(ym2413_bus_t* bus)
 
     /* open default audio CSV (audio_samples.csv) so postprocessing はすぐ可能 */
     ym2413_bus_audio_log_open("audio_samples.csv");
+
+    /* reset debug counters (in case debug is already open we keep file) */
+    g_bus_access_count = 0;
+    g_bus_total_bytes = 0;
+    g_bus_last_access_phiM = 0;
+    g_bus_min_duration = UINT64_MAX;
+    g_bus_max_duration = 0;
+    g_bus_total_duration = 0;
+
+    /* reset phiM instrumentation if not already */
+    g_debug_total_phiM = 0;
+    g_debug_total_phiM_adapter = 0;
+    g_debug_total_phiM_internal = 0;
+    g_debug_flag_current_step_from_adapter = 0;
 }
 
 /*=========================================================================
  * φM カウントを進めつつ、peak-selection と定期サンプリングを行う
+ * (no change to external semantics)
  *=========================================================================*/
 void ym2413_bus_step_phiM_cycles(ym2413_bus_t* bus, uint32_t n_phiM)
 {
@@ -383,13 +481,26 @@ void ym2413_bus_step_phiM_cycles(ym2413_bus_t* bus, uint32_t n_phiM)
             /* キャッシュも更新 */
             g_last_acc_signed = acc;
         } else {
-            /* 常に最新 ACC をキャッシュしておく（サンプリング時に使えるように） */
+            /* 常に最新 ACC をキャッシュしておく（サンプリング時に使うように） */
             g_last_acc_signed = ikaopll_get_acc_signed();
         }
 
         /* posedge の後に negedge を実行してその EMUCLK サイクルを完了する */
         ikaopll_step_emuclk_negedge();
     }
+}
+
+/* Adapter wrapper: mark the stepping as adapter-initiated while calling
+ * the common stepping routine. This lets the instrumentation attribute phiM
+ * increments correctly.
+ */
+void ym2413_bus_step_phiM_cycles_adapter(ym2413_bus_t* bus, uint32_t n_phiM)
+{
+    if (!bus) return;
+    int prev_flag = g_debug_flag_current_step_from_adapter;
+    g_debug_flag_current_step_from_adapter = 1;
+    ym2413_bus_step_phiM_cycles(bus, n_phiM);
+    g_debug_flag_current_step_from_adapter = prev_flag;
 }
 
 /*=========================================================================
@@ -432,8 +543,50 @@ static void ym2413_bus_enforce_wait(ym2413_bus_t* bus, ym2413_last_op_t next_kin
 }
 
 /*=========================================================================
- * I/O シーケンス (既存のまま)
+ * I/O シーケンス (既存のまま) + ログ出力 (追加)
  *=========================================================================*/
+static void ym2413_bus_log_access_internal(ym2413_bus_t* bus, const char* op, uint8_t value)
+{
+    if (!g_debug_fp || !bus) return;
+
+    uint64_t now_phiM = (uint64_t)bus->phiM_cnt;
+    uint64_t delta_phiM = 0;
+    if (g_bus_access_count == 0) {
+        delta_phiM = 0;
+    } else {
+        /* if last stored is larger, clamp to 0 */
+        if (now_phiM >= g_bus_last_access_phiM) delta_phiM = now_phiM - g_bus_last_access_phiM;
+        else delta_phiM = 0;
+    }
+
+    /* approx samples: phiM / PHIM_PER_SAMPLE_D */
+    uint64_t approx_samples = 0;
+    if (k_PHIM_PER_SAMPLE_D > 0.0) {
+        approx_samples = (uint64_t)((double)delta_phiM / k_PHIM_PER_SAMPLE_D + 0.5);
+    }
+
+    g_bus_access_count += 1;
+    g_bus_total_bytes += 1; /* one byte per write call */
+
+    /* update duration stats (skip first as zero delta if desired; include anyway) */
+    if (delta_phiM > 0) {
+        if (delta_phiM < g_bus_min_duration) g_bus_min_duration = delta_phiM;
+        if (delta_phiM > g_bus_max_duration) g_bus_max_duration = delta_phiM;
+        g_bus_total_duration += delta_phiM;
+    } else if (g_bus_access_count == 1) {
+        /* first access sets min to 0 if it was UINT64_MAX */
+        if (g_bus_min_duration == UINT64_MAX) g_bus_min_duration = 0;
+    }
+
+    /* write CSV line */
+    fprintf(g_debug_fp, "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%s,0x%02X\n",
+            g_bus_access_count, now_phiM, delta_phiM, approx_samples, op, (unsigned int)value);
+    fflush(g_debug_fp);
+
+    /* update last access phiM */
+    g_bus_last_access_phiM = now_phiM;
+}
+
 void ym2413_bus_write_addr(ym2413_bus_t* bus, uint8_t addr)
 {
     if (!bus) return;
@@ -460,6 +613,9 @@ void ym2413_bus_write_addr(ym2413_bus_t* bus, uint8_t addr)
 
     ym2413_bus_wait_phiM_posedge(bus);
     ikaopll_set_D(0x00);
+
+    /* Debug log this access */
+    ym2413_bus_log_access_internal(bus, "ADDR", addr);
 }
 
 void ym2413_bus_write_data(ym2413_bus_t* bus, uint8_t data)
@@ -488,4 +644,7 @@ void ym2413_bus_write_data(ym2413_bus_t* bus, uint8_t data)
 
     ym2413_bus_wait_phiM_posedge(bus);
     ikaopll_set_D(0x00);
+
+    /* Debug log this access */
+    ym2413_bus_log_access_internal(bus, "DATA", data);
 }

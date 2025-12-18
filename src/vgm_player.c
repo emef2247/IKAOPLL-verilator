@@ -1,3 +1,20 @@
+/*
+ * src/vgm_player.c
+ *
+ * VGM / CSV player adapter.
+ *
+ * - vgm_player_run_csv: read CSV (relative-delay format) and drive ym2413_bus.
+ * - vgm_player_run_vgm: parse .vgm using vgm_parser and drive ym2413_bus with
+ *   the same algorithm as vgm2csv (current_sample -> event delay -> phiM step ->
+ *   addr/data writes -> post-wait).
+ *
+ * Notes:
+ * - CSV format expected: delay,reg,data with delay as RELATIVE samples by default.
+ * - vgm_player_run_vgm writes an inspection CSV (path.vgm.csv) when possible.
+ * - Adapter uses ym2413_bus_step_phiM_cycles_adapter so the bus can attribute
+ *   phiM increments to the adapter for debugging.
+ */
+
 #include "vgm_player.h"
 
 #include <stdio.h>
@@ -22,7 +39,7 @@ static uint32_t samples_to_phiM(uint32_t delay_samples)
     return r;
 }
 
-/* parse CSV line helper (unchanged) */
+/* parse CSV line helper */
 static int parse_csv_line(const char* line, vgm_csv_event_t* ev)
 {
     char* tmp = strdup(line);
@@ -63,6 +80,9 @@ static int parse_csv_line(const char* line, vgm_csv_event_t* ev)
     return 0;
 }
 
+/* -------------------------------------------------------------------------
+ * CSV player: treat CSV delay as RELATIVE by default (compat with existing tests)
+ * ------------------------------------------------------------------------- */
 int vgm_player_run_csv(const char* path, ym2413_bus_t* bus)
 {
     if (!path || !bus) {
@@ -88,6 +108,11 @@ int vgm_player_run_csv(const char* path, ym2413_bus_t* bus)
     uint64_t total_phiM    = 0;
     uint64_t event_count   = 0;
 
+    /* NOTE: CSV files in this project are relative-delay format by default.
+     * We treat ev.delay_samples AS a relative delay (delta) and do not
+     * reinterpret it as an absolute timestamp. This keeps behavior
+     * compatible with the existing test vectors.
+     */
     while (fgets(line, sizeof(line), fp)) {
         if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0') continue;
 
@@ -97,13 +122,16 @@ int vgm_player_run_csv(const char* path, ym2413_bus_t* bus)
             continue;
         }
 
-        uint32_t phiM_delay = samples_to_phiM(ev.delay_samples);
-        total_samples += ev.delay_samples;
+        uint32_t delta_samples = (uint32_t)ev.delay_samples;
+
+        uint32_t phiM_delay = samples_to_phiM(delta_samples);
+        total_samples += delta_samples;
         total_phiM    += phiM_delay;
         event_count   += 1;
 
         if (phiM_delay > 0) {
-            ym2413_bus_step_phiM_cycles(bus, phiM_delay);
+            /* use adapter wrapper so bus can attribute these steps */
+            ym2413_bus_step_phiM_cycles_adapter(bus, phiM_delay);
         }
 
         if (ev.is_addr) {
@@ -153,7 +181,8 @@ static void vgmrun_step_phiM(uint32_t samples)
     vgmrun_ctx_t *c = g_vgmrun_ctx;
     uint32_t phiM = samples_to_phiM(samples);
     if (phiM > 0) {
-        ym2413_bus_step_phiM_cycles(c->bus, phiM);
+        /* use adapter wrapper so bus attributes these steps to adapter */
+        ym2413_bus_step_phiM_cycles_adapter(c->bus, phiM);
         c->total_phiM += phiM;
     }
     c->total_samples += samples;

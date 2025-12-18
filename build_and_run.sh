@@ -48,21 +48,23 @@ make -C obj_dir -f VIKAOPLL.mk ikaopll_sim
 echo "Running simulation..."
 cd "${ROOT_DIR}"
 
-# runtime args: first positional arg is csv path
-SIM_CSV=${1:-tests/csv/ym2413_scale_chromatic.vgm.csv}
-# forward any extra runtime flags after the CSV path
+# runtime args: first positional arg is csv/vgm path
+SIM_INPUT=${1:-tests/csv/ym2413_scale_chromatic.vgm.csv}
+# forward any extra runtime flags after the input path
 shift 1 || true
 
 # --- Determine runtime flags for informational display ---
 enable_vcd=false
 vcd_file="ikaopll_dump.vcd"
 enable_csv=true
+enable_debug=false
+debug_file="ym2413_bus_calls.log"
 
-# Parse remaining args ($@) to detect --vcd and optional filename, and --no-csv
+# Parse remaining args ($@) to detect --vcd, --no-csv and --debug (with optional filename)
 next_is_vcd_file=false
+next_is_debug_file=false
 for arg in "$@"; do
   if [ "$next_is_vcd_file" = true ]; then
-    # previous token was --vcd and this token is filename (not starting with '-')
     if [ -n "$arg" ] && [ "${arg:0:1}" != "-" ]; then
       vcd_file="$arg"
       next_is_vcd_file=false
@@ -71,15 +73,28 @@ for arg in "$@"; do
       next_is_vcd_file=false
     fi
   fi
+  if [ "$next_is_debug_file" = true ]; then
+    if [ -n "$arg" ] && [ "${arg:0:1}" != "-" ]; then
+      debug_file="$arg"
+      next_is_debug_file=false
+      continue
+    else
+      next_is_debug_file=false
+    fi
+  fi
 
   case "$arg" in
     --vcd)
       enable_vcd=true
-      # If next token is a non-option it will be treated as filename
       next_is_vcd_file=true
       ;;
     --no-csv)
       enable_csv=false
+      ;;
+    --debug)
+      enable_debug=true
+      # If next token is a non-option it will be treated as debug filename
+      next_is_debug_file=true
       ;;
     *)
       # ignore other runtime flags here (they'll be forwarded)
@@ -87,22 +102,24 @@ for arg in "$@"; do
   esac
 done
 
-# If --vcd was present but no filename was provided, keep default vcd_file
+# Compute input type for display (VGM if .vgm extension, else CSV)
+input_type="CSV"
+if [[ "${SIM_INPUT,,}" == *.vgm ]]; then
+  input_type="VGM"
+fi
 
-# Print the same header information main used to print (for consistency & debugging)
+# Print header info
 echo "[run] Invoking simulator (trace build). Use --vcd to enable VCD output."
 echo "IKAOPLL-verilator: YM2413 bus + VGM CSV player"
-printf "  CSV: %s\n" "${SIM_CSV}"
+printf "  INPUT: %s\n" "${SIM_INPUT}"
+printf "  Input type: %s\n" "${input_type}"
 if [ "${enable_vcd}" = true ]; then
   printf "  VCD: enabled -> %s\n" "${vcd_file}"
 else
   printf "  VCD: disabled\n"
 fi
-if [ "${enable_csv}" = true ]; then
-  printf "  CSV logging: enabled\n"
-else
-  printf "  CSV logging: disabled\n"
-fi
+printf "  CSV logging: %s\n" "$( [ "${enable_csv}" = true ] && echo "enabled" || echo "disabled" )"
+printf "  Debug log: %s\n" "$( [ "${enable_debug}" = true ] && echo "enabled -> ${debug_file}" || echo "disabled" )"
 
 # Prepare output files
 SIM_OUT="${BUILD_DIR}/sim_last_output.txt"
@@ -110,7 +127,7 @@ REAL_TIME_FILE="${BUILD_DIR}/sim_last_real_seconds.txt"
 TIME_CMD_OUT="${BUILD_DIR}/sim_time_cmd.txt"
 
 # Informational print of the exact invocation
-echo "[run] Executing: ${BUILD_DIR}/obj_dir/ikaopll_sim ${SIM_CSV} $*"
+echo "[run] Executing: ${BUILD_DIR}/obj_dir/ikaopll_sim ${SIM_INPUT} $*"
 
 # Start high-resolution timestamp
 start_ts=$(date +%s.%N)
@@ -118,10 +135,10 @@ start_ts=$(date +%s.%N)
 # If /usr/bin/time is available, use it to capture real/user/sys in TIME_CMD_OUT,
 # but still capture stdout/stderr of simulator to SIM_OUT.
 if [ -x "$(command -v /usr/bin/time)" ]; then
-  /usr/bin/time -p -o "${TIME_CMD_OUT}" "${BUILD_DIR}/obj_dir/ikaopll_sim" "${SIM_CSV}" "$@" > "${SIM_OUT}" 2>&1
+  /usr/bin/time -p -o "${TIME_CMD_OUT}" "${BUILD_DIR}/obj_dir/ikaopll_sim" "${SIM_INPUT}" "$@" > "${SIM_OUT}" 2>&1
   ret=$?
 else
-  "${BUILD_DIR}/obj_dir/ikaopll_sim" "${SIM_CSV}" "$@" > "${SIM_OUT}" 2>&1
+  "${BUILD_DIR}/obj_dir/ikaopll_sim" "${SIM_INPUT}" "$@" > "${SIM_OUT}" 2>&1
   ret=$?
 fi
 
