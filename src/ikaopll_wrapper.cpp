@@ -2,10 +2,12 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <string>
 
 #include "verilated.h"
 #include "VIKAOPLL.h"
-#include "verilated_vcd_c.h"
+#include "verilated_vcd_c.h" // harmless to include even if not used
 
 /*-------------------------------------------------------------------------
  * グローバルな Verilated モデルインスタンス
@@ -15,7 +17,7 @@ static VIKAOPLL*       g_top       = nullptr;
    IKAOPLL_vgm_tb.sv の `timescale 10ps/10ps` と合わせる。 */
 static vluint64_t      g_main_time = 0;
 
-/* VCD トレース */
+/* VCD トレース（実際に使うのは VM_TRACE が有効なビルド時のみ） */
 static VerilatedVcdC*  g_trace     = nullptr;
 
 /* EMUCLK の内部状態 */
@@ -33,9 +35,13 @@ static void eval_tick()
 {
     if (!g_top) return;
     g_top->eval();
+#if VM_TRACE
     if (g_trace) {
         g_trace->dump(g_main_time);
     }
+#else
+    (void)g_trace;
+#endif
     /* g_main_time の更新は EMUCLK トグル側で行う */
 }
 
@@ -49,7 +55,8 @@ void ikaopll_init(void)
         return; /* すでに初期化済み */
     }
 
-    Verilated::traceEverOn(true); /* トレースを有効化 */
+    /* traceEverOn は呼んでおいて安全（trace メソッド自体は VM_TRACE 判定で呼ぶ） */
+    Verilated::traceEverOn(true);
 
     g_top = new VIKAOPLL();
 
@@ -78,11 +85,15 @@ void ikaopll_init(void)
 
 void ikaopll_release(void)
 {
+#if VM_TRACE
     if (g_trace) {
         g_trace->close();
         delete g_trace;
         g_trace = nullptr;
     }
+#else
+    (void)g_trace;
+#endif
 
     if (g_top) {
         delete g_top;
@@ -97,25 +108,35 @@ void ikaopll_trace_init(const char* vcd_filename)
         std::fprintf(stderr, "ikaopll_trace_init: call ikaopll_init() first.\n");
         return;
     }
+
+#if VM_TRACE
     if (g_trace) {
         g_trace->close();
         delete g_trace;
         g_trace = nullptr;
     }
 
+    Verilated::traceEverOn(true);
     g_trace = new VerilatedVcdC;
-    g_top->trace(g_trace, 99);  /* 深さ 99 (全階層トレース) を指定 */
+    g_top->trace(g_trace, 99);  // depth 99 (元の動作を維持)
     g_trace->open(vcd_filename);
+#else
+    (void)vcd_filename;
+#endif
 }
 
 /* VCD トレースの終了 */
 void ikaopll_trace_close(void)
 {
+#if VM_TRACE
     if (g_trace) {
         g_trace->close();
         delete g_trace;
         g_trace = nullptr;
     }
+#else
+    (void)g_trace;
+#endif
 }
 
 /* シミュレーション時刻取得（10ps 単位のカウンタ） */
@@ -164,7 +185,7 @@ void ikaopll_reset(void)
 
     g_top->i_IC_n = 0;
     for (int i = 0; i < 64; ++i) {
-        ikaopll_step_emuclk_1cycle();
+        ikaopll_step_emuclk_1cycle(); /* header 側の inline 実装を利用 */
     }
 
     g_top->i_IC_n = 1;
