@@ -248,8 +248,9 @@ static void vgmrun_on_reg_write(void *user, VGMChipId chip,
         c->current_sample += (uint64_t)post_wait_samples;
     }
 
-    /* last_output_sample stays as the write time (event_sample) */
-    c->last_output_sample = event_sample;
+    /* last_output_sample should reflect the VGM timeline AFTER applying any post-wait.
+       Use the current_sample (which now includes post_wait_samples) as the new reference. */
+    c->last_output_sample = c->current_sample;
 }
 
 static void vgmrun_on_end(void *user)
