@@ -18,7 +18,14 @@ void ikaopll_init(void);
 void ikaopll_release(void);
 
 /* VCD トレースの初期化・終了 */
-void ikaopll_trace_init(const char* vcd_filename);
+/* Trace API
+ * - ikaopll_trace_init(filename, fmt):
+ *     fmt: "vcd" or "fst" (case-insensitive). If "fst" is requested but the build environment
+ *          does not provide VerilatedFstC, the implementation will fall back to VCD and
+ *          print a warning.
+ *     Returns 0 on success, negative on error.
+ */
+int ikaopll_trace_init(const char* filename, const char* fmt);
 void ikaopll_trace_close(void);
 
 /* シミュレーション時刻 (g_main_time) を取得する */

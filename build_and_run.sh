@@ -23,7 +23,10 @@ done < <(find "${RTL_DIR}/IKAOPLL_modules" -type f -name '*.v' -print0)
 echo "RTL sources:"
 printf '  %s\n' "${RTL_SOURCES[@]}"
 
-# Verilator invocation (keep options as before)
+# Verilator invocation
+# Add -DHAVE_VERILATED_FST_C and Verilator include path so FST support can be compiled in.
+# If your Verilator include path is different, adjust the -I option accordingly.
+VERILATOR_INCLUDE="/usr/share/verilator/include"
 verilator \
   --cc \
   --exe \
@@ -34,12 +37,13 @@ verilator \
   --Wno-WIDTH \
   "${RTL_SOURCES[@]}" \
   "${SRC_DIR}/ikaopll_wrapper.cpp" \
+  "${SRC_DIR}/ikaopll_trace.cpp" \
   "${SRC_DIR}/ym2413_bus.c" \
   "${SRC_DIR}/vgm_player.c" \
   "${SRC_DIR}/vgm_parser.c" \
   "${SRC_DIR}/wav_writer.c" \
   "${SRC_DIR}/main_vgm_csv.c" \
-  -CFLAGS "-O2" \
+  -CFLAGS "-O2 -DHAVE_VERILATED_FST_C -I${VERILATOR_INCLUDE}" \
   -o ikaopll_sim
 
 # Build using generated Makefile
@@ -54,23 +58,25 @@ SIM_INPUT=${1:-tests/csv/ym2413_scale_chromatic.vgm.csv}
 shift 1 || true
 
 # --- Determine runtime flags for informational display ---
-enable_vcd=false
-vcd_file="ikaopll_dump.vcd"
+enable_trace=false
+trace_file="ikaopll_dump.vcd"
+trace_fmt="vcd"   # vcd or fst
+
 enable_csv=true
 enable_debug=false
 debug_file="ym2413_bus_calls.log"
 
-# Parse remaining args ($@) to detect --vcd, --no-csv and --debug (with optional filename)
-next_is_vcd_file=false
+# Parse remaining args ($@) to detect --vcd, --fst, --trace-fmt, --no-csv and --debug (with optional filename)
+next_is_trace_file=false
 next_is_debug_file=false
 for arg in "$@"; do
-  if [ "$next_is_vcd_file" = true ]; then
+  if [ "$next_is_trace_file" = true ]; then
     if [ -n "$arg" ] && [ "${arg:0:1}" != "-" ]; then
-      vcd_file="$arg"
-      next_is_vcd_file=false
+      trace_file="$arg"
+      next_is_trace_file=false
       continue
     else
-      next_is_vcd_file=false
+      next_is_trace_file=false
     fi
   fi
   if [ "$next_is_debug_file" = true ]; then
@@ -85,8 +91,19 @@ for arg in "$@"; do
 
   case "$arg" in
     --vcd)
-      enable_vcd=true
-      next_is_vcd_file=true
+      enable_trace=true
+      trace_fmt="vcd"
+      next_is_trace_file=true
+      ;;
+    --fst)
+      enable_trace=true
+      trace_fmt="fst"
+      next_is_trace_file=true
+      ;;
+    --trace-fmt)
+      # next token should be format; enable trace implicitly
+      # handled here by peeking next argument in the loop; for simplicity we rely on simulator to accept --trace-fmt
+      enable_trace=true
       ;;
     --no-csv)
       enable_csv=false
@@ -109,14 +126,14 @@ if [[ "${SIM_INPUT,,}" == *.vgm ]]; then
 fi
 
 # Print header info
-echo "[run] Invoking simulator (trace build). Use --vcd to enable VCD output."
+echo "[run] Invoking simulator (trace build). Use --vcd or --fst to enable tracing."
 echo "IKAOPLL-verilator: YM2413 bus + VGM CSV player"
 printf "  INPUT: %s\n" "${SIM_INPUT}"
 printf "  Input type: %s\n" "${input_type}"
-if [ "${enable_vcd}" = true ]; then
-  printf "  VCD: enabled -> %s\n" "${vcd_file}"
+if [ "${enable_trace}" = true ]; then
+  printf "  Trace: enabled -> %s (format=%s)\n" "${trace_file}" "${trace_fmt}"
 else
-  printf "  VCD: disabled\n"
+  printf "  Trace: disabled\n"
 fi
 printf "  CSV logging: %s\n" "$( [ "${enable_csv}" = true ] && echo "enabled" || echo "disabled" )"
 printf "  Debug log: %s\n" "$( [ "${enable_debug}" = true ] && echo "enabled -> ${debug_file}" || echo "disabled" )"
