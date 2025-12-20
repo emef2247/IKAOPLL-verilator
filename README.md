@@ -70,6 +70,13 @@ VCD（波形ダンプ）あり/なしのフローを分けて扱うため、2 �
    ./build_and_run_debug.sh tests/csv/ym2413_scale_chromatic.vgm.csv --vcd mytrace.vcd
    ```
 
-## ライセンス / 謝辞
+## ライセンス
 
-（適切なライセンス情報とクレジットをここに記載してください）
+本リポジトリのオリジナル部分は MIT ライセンスで配布されています（詳細は `LICENSE` または `LICENSE.md` を参照してください）。
+
+なお、本リポジトリには IKAOPLL (https://github.com/ika-musume/IKAOPLL) のソースを `rtl/` 配下に含めています。これらの IKAOPLL のファイルは元の著作権表示および BSD 2‑Clause "Simplified" License を保持しています。取り込んだ IKAOPLL のライセンス文は `rtl/IKAOPLL_LICENSE` に保存してあります。IKAOPLL のソースを含めた配布（ソース・バイナリ問わず）を行う場合は、該当の著作権表示とライセンス文を削除せずに同梱してください。
+
+English:
+The original code written for this repository is licensed under the MIT License (see LICENSE or LICENSE.md).
+This repository also bundles the IKAOPLL sources under `rtl/`, which are provided by the upstream author under the BSD 2‑Clause "Simplified" License. The text of that license is available at `rtl/IKAOPLL_LICENSE`.
+When redistributing this repository (source or binary), please include the third‑party copyright/license text as required.
