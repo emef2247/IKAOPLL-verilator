@@ -37,7 +37,6 @@ verilator \
   --Wno-WIDTH \
   "${RTL_SOURCES[@]}" \
   "${SRC_DIR}/ikaopll_wrapper.cpp" \
-  "${SRC_DIR}/ikaopll_trace.cpp" \
   "${SRC_DIR}/ym2413_bus.c" \
   "${SRC_DIR}/vgm_player.c" \
   "${SRC_DIR}/vgm_parser.c" \
