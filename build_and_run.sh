@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${ROOT_DIR}/build"
 
+TB_DIR="${ROOT_DIR}/tb"
 RTL_DIR="${ROOT_DIR}/rtl"
 SRC_DIR="${ROOT_DIR}/src"
 
@@ -57,60 +58,37 @@ SIM_INPUT=${1:-tests/csv/ym2413_scale_chromatic.vgm.csv}
 shift 1 || true
 
 # --- Determine runtime flags for informational display ---
+# Default: do NOT produce CSV unless explicitly requested.
 enable_trace=false
 trace_file="ikaopll_dump.vcd"
 trace_fmt="vcd"   # vcd or fst
 
-enable_csv=true
+enable_csv=false   # <-- default: disabled (equivalent to --no-csv)
 enable_debug=false
 debug_file="ym2413_bus_calls.log"
 
-# Parse remaining args ($@) to detect --vcd, --fst, --trace-fmt, --no-csv and --debug (with optional filename)
-next_is_trace_file=false
-next_is_debug_file=false
+# Parse remaining args ($@) to detect trace flags, csv enable/disable and debug (with optional filename)
 for arg in "$@"; do
-  if [ "$next_is_trace_file" = true ]; then
-    if [ -n "$arg" ] && [ "${arg:0:1}" != "-" ]; then
-      trace_file="$arg"
-      next_is_trace_file=false
-      continue
-    else
-      next_is_trace_file=false
-    fi
-  fi
-  if [ "$next_is_debug_file" = true ]; then
-    if [ -n "$arg" ] && [ "${arg:0:1}" != "-" ]; then
-      debug_file="$arg"
-      next_is_debug_file=false
-      continue
-    else
-      next_is_debug_file=false
-    fi
-  fi
-
   case "$arg" in
     --vcd)
       enable_trace=true
       trace_fmt="vcd"
-      next_is_trace_file=true
       ;;
     --fst)
       enable_trace=true
       trace_fmt="fst"
-      next_is_trace_file=true
       ;;
     --trace-fmt)
-      # next token should be format; enable trace implicitly
-      # handled here by peeking next argument in the loop; for simplicity we rely on simulator to accept --trace-fmt
       enable_trace=true
       ;;
     --no-csv)
       enable_csv=false
       ;;
+    --enable-csv)
+      enable_csv=true
+      ;;
     --debug)
       enable_debug=true
-      # If next token is a non-option it will be treated as debug filename
-      next_is_debug_file=true
       ;;
     *)
       # ignore other runtime flags here (they'll be forwarded)
@@ -130,11 +108,11 @@ echo "IKAOPLL-verilator: YM2413 bus + VGM CSV player"
 printf "  INPUT: %s\n" "${SIM_INPUT}"
 printf "  Input type: %s\n" "${input_type}"
 if [ "${enable_trace}" = true ]; then
-  printf "  Trace: enabled -> %s (format=%s)\n" "${trace_file}" "${trace_fmt}"
+  printf "  Trace: enabled (format=%s) -> %s\n" "${trace_fmt}" "${trace_file}"
 else
   printf "  Trace: disabled\n"
 fi
-printf "  CSV logging: %s\n" "$( [ "${enable_csv}" = true ] && echo "enabled" || echo "disabled" )"
+printf "  CSV logging: %s\n" "$( [ "${enable_csv}" = true ] && echo "enabled" || echo "disabled (default)" )"
 printf "  Debug log: %s\n" "$( [ "${enable_debug}" = true ] && echo "enabled -> ${debug_file}" || echo "disabled" )"
 
 # Prepare output files
@@ -142,8 +120,29 @@ SIM_OUT="${BUILD_DIR}/sim_last_output.txt"
 REAL_TIME_FILE="${BUILD_DIR}/sim_last_real_seconds.txt"
 TIME_CMD_OUT="${BUILD_DIR}/sim_time_cmd.txt"
 
+# Build the arguments to forward to the simulator.
+# Forward original runtime args except --enable-csv / --no-csv (we control CSV default here).
+FORWARD_ARGS=()
+for a in "$@"; do
+  case "$a" in
+    --enable-csv|--no-csv)
+      # skip, handled by this wrapper
+      ;;
+    *)
+      FORWARD_ARGS+=("$a")
+      ;;
+  esac
+done
+
+# Build final simulator args: input + CSV flag (if disabled add --no-csv) + forwarded args
+SIM_ARGS=("${SIM_INPUT}")
+if [ "${enable_csv}" = false ]; then
+  SIM_ARGS+=("--no-csv")
+fi
+SIM_ARGS+=("${FORWARD_ARGS[@]}")
+
 # Informational print of the exact invocation
-echo "[run] Executing: ${BUILD_DIR}/obj_dir/ikaopll_sim ${SIM_INPUT} $*"
+echo "[run] Executing: ${BUILD_DIR}/obj_dir/ikaopll_sim ${SIM_ARGS[*]}"
 
 # Start high-resolution timestamp
 start_ts=$(date +%s.%N)
@@ -151,10 +150,10 @@ start_ts=$(date +%s.%N)
 # If /usr/bin/time is available, use it to capture real/user/sys in TIME_CMD_OUT,
 # but still capture stdout/stderr of simulator to SIM_OUT.
 if [ -x "$(command -v /usr/bin/time)" ]; then
-  /usr/bin/time -p -o "${TIME_CMD_OUT}" "${BUILD_DIR}/obj_dir/ikaopll_sim" "${SIM_INPUT}" "$@" > "${SIM_OUT}" 2>&1
+  /usr/bin/time -p -o "${TIME_CMD_OUT}" "${BUILD_DIR}/obj_dir/ikaopll_sim" "${SIM_ARGS[@]}" > "${SIM_OUT}" 2>&1
   ret=$?
 else
-  "${BUILD_DIR}/obj_dir/ikaopll_sim" "${SIM_INPUT}" "$@" > "${SIM_OUT}" 2>&1
+  "${BUILD_DIR}/obj_dir/ikaopll_sim" "${SIM_ARGS[@]}" > "${SIM_OUT}" 2>&1
   ret=$?
 fi
 
