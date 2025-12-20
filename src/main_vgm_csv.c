@@ -83,7 +83,7 @@ int main(int argc, char** argv)
     } else {
         printf("  VCD: disabled\n");
     }
-    printf("  CSV logging: %s\n", enable_csv ? "enabled (MO value changes only)" : "disabled");
+    printf("  CSV logging: %s\n", enable_csv ? "enabled (MO value changes only + ACC + signal dump)" : "disabled");
     printf("  Debug log: %s\n", enable_debug ? debug_filename : "disabled");
 
     /* Verilated IKAOPLL インスタンス初期化 */
@@ -93,7 +93,7 @@ int main(int argc, char** argv)
     if (enable_vcd) {
         ikaopll_trace_init(vcd_filename);
     }
-	
+    
     /* phiM_PCEN_n は TB と同様 0 固定 */
     ikaopll_set_phiM_pcen_n(0);
 
@@ -109,13 +109,16 @@ int main(int argc, char** argv)
         ym2413_bus_debug_open(debug_filename);
     }
 
-    /* ACC / Mo ログ開始（runtime で制御可能）
-       NOTE: We only open the MO signal-change log (ikaopll_mo_change_log) here.
-       The legacy ym2413_bus_mo_log / acc_log are NOT opened when enable_csv is true.
-     */
+    /* ACC / Mo / Signal ダンプ開始（runtime で制御可能） */
     if (enable_csv) {
         /* MO 差分ログをオープン（信号変化ログのみ） */
         ikaopll_mo_change_log_open("mo_value_changes.csv");
+
+        /* ACC のストローブログも出す（t_ps,acc） */
+        ym2413_bus_acc_log_open("acc_log.csv");
+
+        /* Signal change-point dump (detailed top-level signals) */
+        ikaopll_signal_dump_open("signal_dump.csv");
     }
 
     /* VGM CSV または VGM を読み込んでシーケンスを実行 */
@@ -133,6 +136,12 @@ int main(int argc, char** argv)
         if (enable_csv) {
             /* MO 差分ログをクローズ */
             ikaopll_mo_change_log_close();
+            /* ACCログをクローズ */
+            ym2413_bus_acc_log_close();
+            /* Signal dump をクローズ */
+            ikaopll_signal_dump_close();
+            /* audio sampling log was opened in ym2413_bus_init(); ensure it is closed */
+            ym2413_bus_audio_log_close();
         }
         if (enable_debug) {
             ym2413_bus_debug_close();
@@ -146,14 +155,23 @@ int main(int argc, char** argv)
 
     /* ログ終了 */
     if (enable_csv) {
-        /* only close the MO change log (we didn't open other logs) */
+        /* close the MO change log */
         ikaopll_mo_change_log_close();
+
+        /* close ACC log if opened */
+        ym2413_bus_acc_log_close();
+
+        /* close signal dump if opened */
+        ikaopll_signal_dump_close();
     }
 
     /* close debug log if open */
     if (enable_debug) {
         ym2413_bus_debug_close();
     }
+
+    /* audio sampling log was opened in ym2413_bus_init(); ensure it is closed */
+    ym2413_bus_audio_log_close();
 
     /* g_main_time は 1ps 単位の tick 数 */
     uint64_t sim_ticks = ikaopll_get_sim_time();
@@ -165,7 +183,7 @@ int main(int argc, char** argv)
     if (enable_vcd) {
         ikaopll_trace_close();
     }
-	
+    
     ikaopll_release();
 
     return 0;

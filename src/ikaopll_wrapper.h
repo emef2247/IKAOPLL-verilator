@@ -55,16 +55,28 @@ uint8_t ikaopll_get_acc_strb(void);
 
 /*-------------------------------------------------------------------------
  * MO 変化差分ログ（CSV）
- *
- * - ikaopll_mo_change_log_open(path) を呼ぶと "t_ps,mo_signed" ヘッダ付きで
- *   指定パスにログを開きます。path==NULL の場合は "mo_value_changes.csv" を使用。
- * - ikaopll_mo_change_log_close() でクローズ。
- *
- * ログは EMUCLK の eval の後に差分検出して出力します。
- * 出力される時刻は ikaopll_get_sim_time()（ps 単位）です。
  *------------------------------------------------------------------------*/
 void ikaopll_mo_change_log_open(const char* path);
 void ikaopll_mo_change_log_close(void);
+
+/*-------------------------------------------------------------------------
+ * Signal dump (change-point CSV)
+ *
+ * Format (CSV): timestamp_ps,signal,value,duration_ps
+ * - timestamp_ps : current sim time in ps (ikaopll_get_sim_time())
+ * - signal       : textual signal name (e.g., "o_IMP_FLUC_SIGNED_MO")
+ * - value        : integer representation of the signal value
+ * - duration_ps  : difference in ps from the previous change for the same signal
+ *
+ * Usage:
+ *  - Call ikaopll_signal_dump_open("signal_dump.csv") to start logging.
+ *  - During simulation each EMUCLK half-step will check for changes and append rows.
+ *  - Call ikaopll_signal_dump_close() at the end to flush/close the file.
+ *
+ * Note: This is implemented in C and does not modify Verilog RTL.
+ *------------------------------------------------------------------------*/
+void ikaopll_signal_dump_open(const char* path);
+void ikaopll_signal_dump_close(void);
 
 #ifdef __cplusplus
 }
