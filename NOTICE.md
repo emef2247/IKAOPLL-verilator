@@ -1,20 +1,11 @@
-NOTICE / サードパーティライセンス情報（日本語 / English）
+NOTICE / Third‑party license information（日本語 / English）
 
 日本語:
-このリポジトリは、作者が明示する部分（本リポジトリで新たに作成したコード）については MIT ライセンスで配布しています（詳細はルートの LICENSE を参照してください）。
-ただし、本リポジトリには別リポジトリから取得した IKAOPLL のソースコードが含まれています。これらは元の著作権表示・ライセンス（BSD 2‑Clause "Simplified" License）を保持しています。取り込んだ upstream のライセンス文は `rtl/IKAOPLL_LICENSE` に収めてあります。
-
-再配布やバイナリ配布の際は、上記第三者ライセンス（rtl/IKAOPLL_LICENSE）と著作権表示を削除せずに同梱してください。
+本プロジェクトの独自のコードは BSD 2‑Clause "Simplified" License の下で配布されています（ルートの `LICENSE` を参照）。
+本リポジトリは IKAOPLL の RTL ソースを直接含まない運用を想定しています。RTL を利用する場合はローカルで取得してください。付属スクリプトを使用すると、取得した upstream のライセンス文が `rtl/IKAOPLL_LICENSE` に保存されます（例: `./tools/create_rtl_dir.sh --fetch-raw https://github.com/ika-musume/IKAOPLL/tree/main`）。
+取り込んだサードパーティのファイルを配布する際は、該当ファイルの著作権表示とライセンス文を保持してください。
 
 English:
-This repository's original code is distributed under the MIT License (see LICENSE at repository root).
-However, it includes third‑party sources copied from other projects that retain their original licenses.
-
-Notably:
-- IKAOPLL (upstream repository: https://github.com/ika-musume/IKAOPLL)
-  - License: BSD 2‑Clause "Simplified" License
-  - License text included at: ./rtl/IKAOPLL_LICENSE
-  - Files included: the IKAOPLL sources under rtl/
-
-When redistributing this repository (source or binary), please preserve the third‑party copyright notices
-and license texts as provided above.
+This repository's own code is licensed under the BSD 2‑Clause "Simplified" License (see `LICENSE` at the repository root).
+This repository does not include the IKAOPLL RTL sources directly. If you need them, fetch them locally. The bundled helper will store the upstream license as `rtl/IKAOPLL_LICENSE` (example: `./tools/create_rtl_dir.sh --fetch-raw https://github.com/ika-musume/IKAOPLL/tree/main`).
+When redistributing third‑party files, preserve their copyright notices and license texts.

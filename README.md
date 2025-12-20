@@ -1,82 +1,124 @@
 # IKAOPLL-verilator
 
-Verilator を使った軽量な IKAOPLL (YM2413相当) のシミュレーションハーネスです。  
-以下のリファレンスを提供を目的としています
-- Verilatorを活用したVerilogからCへの変換 (IKAOPLLのVerilogをC++に変換して実行）
-- IKAOPLLへ任意のタイミングでレジスタアクセス (vgmのデータに基づきレジスタアクセスを行うテストベンチの提供）
-- VCDやcsvによる情報のダンプ
+（既存の README 内容はそのまま残してください。以下は追記するライセンス／使い方のセクションです）
 
-## 前提環境
+---
 
-- Verilator（比較的新しいバージョンを推奨）
-- g++ / make
-- bash 環境（Linux / WSL 等）
-- Python（任意、tools 配下のユーティリティ用）
+## 環境構築（rtl ディレクトリの作成）
 
-## リポジトリ構成（重要ファイル）
+本プロジェクトでは IKAOPLL の RTL ソースを `rtl/` 配下に置いて使います。手元にソースが無い場合は付属スクリプトで upstream から取得できます。fetch モードでは GitHub の `blob` ベース URL を与えてください（スクリプトが raw.githubusercontent 用 URL に変換します）。
 
-- rtl/ — Verilog RTL（トップ／モジュール）
-- src/ — C/C++ のラッパー、プレイヤー、ユーティリティ
-- build/ — ビルド出力（obj_dir）
-- build_and_run.sh — デフォルトのビルド＋実行スクリプト（デフォルトで VCD は出さない）
-- build_and_run_debug.sh — `build_and_run.sh` をベースに最小差分で `--trace` ビルドしたもの。VCD の ON/OFF は実行時のフラグで制御します
-- tests/ — テスト用 VGM/CSV/MML
-- tools/ — 補助スクリプト
+例：
+```bash
+./tools/create_rtl_dir.sh --fetch-raw https://github.com/ika-musume/IKAOPLL/tree/main
+```
 
-## ビルドと実行
+- 上のコマンドは `rtl/IKAOPLL.v` と `rtl/IKAOPLL_modules/*` を取得します。
+- 併せて upstream の LICENSE を `rtl/IKAOPLL_LICENSE` に保存します（サードパーティのライセンスを保持するため）。
+- `curl` または `wget` が必要です。ない場合はインストールしてください。
+- 既にファイルがある場合は上書きしません。強制上書きしたいときはスクリプトの `--force` オプションを使ってください。
 
-VCD（波形ダンプ）あり/なしのフローを分けて扱うため、2 つのスクリプトを用意しています。
+---
 
-1) 通常（VCD OFF・高速）
-- 目的：波形を出力しない通常のバッチ実行／WAV 出力の確認など
-- 実行例：
-  ```
-  ./build_and_run.sh tests/csv/ym2413_scale_chromatic.vgm.csv
-  ```
+## 実行方法
 
-2) デバッグ（trace 有効でビルド、VCD は実行時で制御）
-- 目的：trace（VCD）を取りたい場合に使う。ビルド自体は `--trace` を付けて行うが、VCD の実際の生成は実行時フラグで切り替えます。
-- 実行例（trace ビルドのみ、VCD は出さない）：
-  ```
-  ./build_and_run_debug.sh tests/csv/ym2413_scale_chromatic.vgm.csv
-  ```
-- 実行例（trace ビルドして VCD を出す）：
-  ```
-  ./build_and_run_debug.sh tests/csv/ym2413_scale_chromatic.vgm.csv --vcd mytrace.vcd
-  ```
-- 実行時に使える主なフラグ（`main_vgm_csv.c` による）：
-  - `--vcd [filename]` — VCD を有効にする（省略時は `ikaopll_dump.vcd`）
-  - `--no-csv` — ACC/Mo の CSV ログ出力を無効にする
+ビルドと実行用スクリプト: `./build_and_run.sh`  
+（スクリプトは Verilator によるビルドとシミュレーションの起動を行います）
 
-注意：VCD を生成するには trace をサポートしたバイナリ（`--trace` でビルド）で実行し、実行時に `--vcd` を渡す必要があります。debug スクリプトはそのために `--trace` ビルドを行いますが、VCD の ON/OFF 自体はランタイムでの制御としています。
+基本的な使い方
+- CSV 入力の場合（CSV は後述の方法で作成できます）
+```bash
+./build_and_run.sh tests/csv/ym2413_scale_rom1.vgm.csv
+```
 
-## 典型的な作業フロー
+- VGM 入力ファイルの場合
+```bash
+./build_and_run.sh tests/vgm/ym2413_scale_rom1.vgm
+```
 
-1. VCD を使わない高速確認（推奨）
-   ```
-   rm -rf build/obj_dir
-   ./build_and_run.sh tests/csv/ym2413_scale_chromatic.vgm.csv
-   ```
+よく使うオプション
+- `--vcd <file>` : VCD を出力します（デフォルトファイル名は `ikaopll_dump.vcd`）。全信号ダンプは大きなサイズになります（full dump に注意）。
+- `--fst <file>` : FST 形式のトレース出力を行います（Verilator の FST トレースを利用する場合）。
+- `--enable-csv` : CSV ログ（MO/ACC 等）を有効にします。
+- `--no-csv` : CSV ログを無効にします（デフォルトは CSV 無効になっています）。
 
-2. trace ビルドのみ（VCD は出さない）
-   ```
-   rm -rf build/obj_dir
-   ./build_and_run_debug.sh tests/csv/ym2413_scale_chromatic.vgm.csv
-   ```
+デフォルトについて
+- スクリプトは「デフォルトで CSV ログを出力しない」設定になっています。CSV を取りたい場合は実行時に `--enable-csv` を指定してください。
 
-3. trace ビルドして VCD を生成
-   ```
-   rm -rf build/obj_dir
-   ./build_and_run_debug.sh tests/csv/ym2413_scale_chromatic.vgm.csv --vcd mytrace.vcd
-   ```
+CSV / VCD の注意
+- VCD/FST の出力はファイルサイズが非常に大きくなることがあります（full dump）。ディスク容量に注意してください。
+- CSV ログ（特に EMUCLK 毎の高頻度ログ）は多数の行を吐くため、必要な区間だけログする運用を推奨します。
 
-## ライセンス
+MO（DAC）ログについて
+- `--enable-csv` を付けて実行すると、シミュレータは MO に関する差分ログを出力します（ファイル名: `mo_value_changes.csv`）。
+- `mo_value_changes.csv` のフォーマット（列）
+  - t_ps : タイムスタンプ（ピコ秒）
+  - mo_signed : DAC 出力（signed）の変化後の値
+  - （実装により他の列を含める場合があります。必要に応じてヘッダを確認してください）
+- `mo_value_changes.csv` は value-change（変化のみ）ログなので、そのままでは等間隔サンプリングになっていません。音声化する際はデシメーション（重み付き平均や ZOH）などの処理が必要です。
 
-本リポジトリのオリジナル部分は MIT ライセンスで配布されています（詳細は `LICENSE` または `LICENSE.md` を参照してください）。
+---
 
-なお、本リポジトリには IKAOPLL (https://github.com/ika-musume/IKAOPLL) のソースを `rtl/` 配下に含めています。これらの IKAOPLL のファイルは元の著作権表示および BSD 2‑Clause "Simplified" License を保持しています。取り込んだ IKAOPLL のライセンス文は `rtl/IKAOPLL_LICENSE` に保存してあります。IKAOPLL のソースを含めた配布（ソース・バイナリ問わず）を行う場合は、該当の著作権表示とライセンス文を削除せずに同梱してください。
+## 実行後の WAV 生成方法（ログ → WAV）
 
-English:
-The original code written for this repository is licensed under the MIT License (see LICENSE or LICENSE.md).
-This repository also bundles the IKAOPLL sources under `rtl/`, which are provided by the upstream author under the BSD 2‑Clause "Simplified" License. The text of that license is available at `rtl/IKAOPLL_LICENSE`.
-When redistributing this repository (source or binary), please include the third‑party copyright/license text as required.
+いくつかツールを用意しています。標準的な流れと例を示します。
+
+1) `audio_samples.csv`（シミュレータ側でサンプリングして出力した ACC 等）から WAV を作る（デフォルト）
+```bash
+python3 ./tools/csv_to_wav.py -i audio_samples.csv -o out_acc.wav --col-name acc_signed --scale 1
+```
+- `--col-name` で CSV 内のカラムを指定します（例: `acc_signed`）。
+- `--scale` は値のスケーリング係数です（実機や用途に合わせ調整）。
+
+2) DAC の差分ログ (`mo_value_changes.csv`) を使って WAV を作る（より忠実にしたい場合）
+- このログは値変化のみを記録しているため、重み付き平均などでデシメーションするのが妥当です（短いパルスの寄与を正しく反映するため）。
+- スクリプト例（重み付け平均デシメーション）:
+```bash
+python3 ./tools/mo_changes_to_wav_weighted.py -i mo_value_changes.csv -o mo_avg.wav
+```
+- 使い方の主なオプション:
+  - `--sr` : サンプリング周波数（デフォルト 44100）
+  - `--scale` : 値のスケーリング（例: 64）
+  - `--start-ps` / `--end-ps` : 取り出す時間範囲（ps 単位）
+
+3) 単純な ZOH（直前の値を保持）でリサンプリングする場合
+```bash
+python3 ./tools/mo_changes_to_wav.py -i mo_value_changes.csv -o mo.wav --samplerate 44100 --scale 64
+```
+
+補足
+- `mo_changes_to_wav_weighted.py` は、各オーディオサンプル区間に対して時間で重み付けした平均を計算することで、短いパルスのエネルギーを正しく集約する方式です。value-change だけのログから基音成分を取り出す際に有効です。
+- それでも期待する音程が見えない場合は、より高密度なログ（EMUCLK 毎）を取るか、シミュレータ側で追加ログを行うことを検討してください（ただしデータ量は大幅に増えます）。
+
+---
+
+## 例：フルワークフロー
+
+1. RTL の準備
+```bash
+./tools/create_rtl_dir.sh --fetch-raw https://github.com/ika-musume/IKAOPLL/tree/main
+```
+
+2. ビルド＋シミュレーション（CSV 生成なし；VCD なし）
+```bash
+./build_and_run.sh tests/csv/ym2413_scale_rom1.vgm.csv
+```
+
+3. CSV（MO の変化ログ）を取りたい場合（`--enable-csv` を付ける）
+```bash
+./build_and_run.sh tests/csv/ym2413_scale_rom1.vgm.csv --enable-csv
+# これにより mo_value_changes.csv 等が生成されます（出力先は実行ディレクトリ）
+```
+
+4. mo_value_changes.csv を WAV に変換（重み付け平均）
+```bash
+python3 ./tools/mo_changes_to_wav_weighted.py -i mo_value_changes.csv -o mo_avg.wav
+```
+
+---
+
+## 参考・注意事項
+
+- 出力されるタイムスタンプはピコ秒（ps）単位です。WAV 変換スクリプトは ps を秒に変換してサンプリング間隔を計算します。
+- VCD の全信号ダンプは巨大になります。ディスク容量に余裕がない場合は不要なトレースを無効化してください。
+- IKAOPLL の RTL ソースは本リポジトリに含まれていません。必要な場合はローカルで取得してください。取得には付属のスクリプトを使えます（例: ./tools/create_rtl_dir.sh --fetch-raw https://github.com/ika-musume/IKAOPLL/tree/main）。
