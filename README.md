@@ -13,11 +13,6 @@
 ./tools/create_rtl_dir.sh --fetch-raw https://github.com/ika-musume/IKAOPLL/tree/main
 ```
 
-- 上のコマンドは `rtl/IKAOPLL.v` と `rtl/IKAOPLL_modules/*` を取得します。
-- 併せて upstream の LICENSE を `rtl/IKAOPLL_LICENSE` に保存します（サードパーティのライセンスを保持するため）。
-- `curl` または `wget` が必要です。ない場合はインストールしてください。
-- 既にファイルがある場合は上書きしません。強制上書きしたいときはスクリプトの `--force` オプションを使ってください。
-
 ---
 
 ## 実行方法
@@ -46,7 +41,7 @@
 - スクリプトは「デフォルトで CSV ログを出力しない」設定になっています。CSV を取りたい場合は実行時に `--enable-csv` を指定してください。
 
 CSV / VCD の注意
-- VCD/FST の出力はファイルサイズが非常に大きくなることがあります（full dump）。ディスク容量に注意してください。
+- VCD の出力はファイルサイズが非常に大きくなることがあります（full dump）。ディスク容量に注意してください。
 - CSV ログ（特に EMUCLK 毎の高頻度ログ）は多数の行を吐くため、必要な区間だけログする運用を推奨します。
 
 MO（DAC）ログについて
