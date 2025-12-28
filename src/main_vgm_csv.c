@@ -9,12 +9,13 @@
 #include "ym2413_bus.h"
 #include "vgm_player.h"
 
+
 /*
- Minimal runtime flag support:
-  - --vcd [filename]   : enable VCD output, optional filename (default: ikaopll_dump.vcd)
-  - --no-csv           : disable ACC / Mo CSV logging (default: enabled)
-  - --debug [file]     : enable bus debug logging (optional filename; default: ym2413_bus_calls.log)
-  Other args preserved: first non-option argument is treated as CSV or VGM path.
+ 最小限の実行時フラグ対応：
+  - --vcd [ファイル名]   : VCD出力を有効化、ファイル名は省略可（デフォルト: ikaopll_dump.vcd）
+  - --no-csv           : ACC / Mo のCSVログ出力を無効化（デフォルトでは有効）
+  - --debug [ファイル] : バスのデバッグログを有効化（ファイル名は省略可；デフォルト: ym2413_bus_calls.log）
+  その他の引数は保持され、最初のオプションでない引数はCSVまたはVGMのパスとして扱う。
 */
 
 static void print_usage(const char *progname)
@@ -41,12 +42,12 @@ int main(int argc, char** argv)
     bool enable_debug = false;
     char debug_filename[256] = "ym2413_bus_calls.log";
 
-    /* Parse arguments simply: accept positional csv_path and options anywhere */
+	/* 引数をシンプルにパース：位置引数の csv_path とオプションをどこにあっても受け付ける */
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--vcd") == 0) {
             enable_vcd = true;
             if (i + 1 < argc && argv[i+1][0] != '-') {
-                /* next token is filename */
+				/* 次のトークンはファイル名 */
                 strncpy(vcd_filename, argv[i+1], sizeof(vcd_filename)-1);
                 vcd_filename[sizeof(vcd_filename)-1] = '\0';
                 ++i;
@@ -64,15 +65,15 @@ int main(int argc, char** argv)
             print_usage(argv[0]);
             return 0;
         } else if (argv[i][0] == '-') {
-            /* unknown option: ignore or extend as needed */
+			/* 未知のオプション：無視するか、必要に応じて拡張する */
             fprintf(stderr, "Warning: unknown option '%s' (ignored)\n", argv[i]);
         } else {
-            /* first non-option token treated as csv or vgm path */
+			/* 最初のオプションでないトークンは CSV または VGM のパスとして扱う */
             csv_path = argv[i];
         }
     }
 
-    /* Determine input type for display */
+	/* 表示用に入力の種類を判定する */
     bool input_is_vgm = has_vgm_extension_or_none(csv_path);
 
     printf("IKAOPLL-verilator: YM2413 bus + VGM CSV player\n");
@@ -93,6 +94,34 @@ int main(int argc, char** argv)
     if (enable_vcd) {
         ikaopll_trace_init(vcd_filename);
     }
+
+	/* --- 入力ファイルからディレクトリと拡張子を除いた名前を使って、音声出力のベース名を設定 --- */
+    {
+		/* csv_path は現在、位置引数として渡された入力パスを保持している */
+        const char *p = csv_path;
+        const char *fname = p;
+        const char *slash = strrchr(p, '/');
+        if (slash) fname = slash + 1;
+#ifdef _WIN32
+		/* 念のため、Windows のバックスラッシュに対応する */
+        slash = strrchr(p, '\\');
+        if (slash) fname = slash + 1;
+#endif
+        char basebuf[256];
+        strncpy(basebuf, fname, sizeof(basebuf)-1);
+        basebuf[sizeof(basebuf)-1] = '\0';
+		/* 拡張子を取り除く */
+        char *dot = strrchr(basebuf, '.');
+        if (dot) *dot = '\0';
+		/* 空だった場合のフォールバック */
+        if (basebuf[0] == '\0') {
+            strncpy(basebuf, "audio_samples", sizeof(basebuf)-1);
+            basebuf[sizeof(basebuf)-1] = '\0';
+        }
+		/* ym2413_bus 用のベース名を設定する */
+        ym2413_bus_set_output_basename(basebuf);
+        printf("Audio outputs will be: %s.csv and %s.wav\n", basebuf, basebuf);
+    }
 	
     /* phiM_PCEN_n は TB と同様 0 固定 */
     ikaopll_set_phiM_pcen_n(0);
@@ -104,15 +133,16 @@ int main(int argc, char** argv)
     ym2413_bus_t bus;
     ym2413_bus_init(&bus);
 
-    /* Debug log open if requested */
+	/* 要求があればデバッグログを開く */
     if (enable_debug) {
         ym2413_bus_debug_open(debug_filename);
     }
 
-    /* ACC / Mo ログ開始（runtime で制御可能）
-       NOTE: We only open the MO signal-change log (ikaopll_mo_change_log) here.
-       The legacy ym2413_bus_mo_log / acc_log are NOT opened when enable_csv is true.
-     */
+
+	 /* ACC / Mo ログ開始（実行時に制御可能）
+		※ここでは MO の信号変化ログ（ikaopll_mo_change_log）だけを開く。
+		enable_csv が true の場合、従来の ym2413_bus_mo_log / acc_log は開かれない。
+	*/
     if (enable_csv) {
         /* MO 差分ログをオープン（信号変化ログのみ） */
         ikaopll_mo_change_log_open("mo_value_changes.csv");
@@ -121,10 +151,10 @@ int main(int argc, char** argv)
     /* VGM CSV または VGM を読み込んでシーケンスを実行 */
     int rv = 0;
     if (input_is_vgm) {
-        /* Input ends with .vgm -> parse VGM directly */
+		/* 入力が .vgm で終わっていれば、VGM を直接パースする */
         rv = vgm_player_run_vgm(csv_path, &bus);
     } else {
-        /* Treat as CSV */
+		/* CSVとして扱う */
         rv = vgm_player_run_csv(csv_path, &bus);
     }
 
@@ -146,11 +176,11 @@ int main(int argc, char** argv)
 
     /* ログ終了 */
     if (enable_csv) {
-        /* only close the MO change log (we didn't open other logs) */
+		/* MO変化ログだけを閉じる（他のログは開いていない） */
         ikaopll_mo_change_log_close();
     }
 
-    /* close debug log if open */
+	/* デバッグログが開いていれば閉じる */
     if (enable_debug) {
         ym2413_bus_debug_close();
     }

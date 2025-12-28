@@ -66,6 +66,22 @@ uint8_t ikaopll_get_acc_strb(void);
 void ikaopll_mo_change_log_open(const char* path);
 void ikaopll_mo_change_log_close(void);
 
+/*-------------------------------------------------------------------------
+ * WAV 出力（テストベンチ／バス側から呼び出し可能）
+ *
+ * - ikaopll_audio_wav_open(path, sample_rate)
+ *     WAV の収集／書き出しを開始する。path が NULL の場合は "audio_samples.wav" を使用。
+ * - ikaopll_audio_wav_write(mo_signed, acc_signed)
+ *     現在の mo_signed から導出されたモノラルサンプルを1つ追加する。
+ * - ikaopll_audio_wav_close()
+ *     WAV ファイルをクローズしてフラッシュする。
+ *
+ * これらの関数はオプションであり、ym2413_bus 側で利用可能であれば呼び出される。
+ *------------------------------------------------------------------------*/
+void ikaopll_audio_wav_open(const char* path, int sample_rate);
+void ikaopll_audio_wav_write(int16_t mo_signed, int16_t acc_signed);
+void ikaopll_audio_wav_close(void);
+
 #ifdef __cplusplus
 }
 #endif

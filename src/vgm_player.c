@@ -1,20 +1,19 @@
 /*
  * src/vgm_player.c
  *
- * VGM / CSV player adapter.
+ * VGM／CSV プレイヤー用アダプタ。
  *
- * - vgm_player_run_csv: read CSV (relative-delay format) and drive ym2413_bus.
- * - vgm_player_run_vgm: parse .vgm using vgm_parser and drive ym2413_bus with
- *   the same algorithm as vgm2csv (current_sample -> event delay -> phiM step ->
- *   addr/data writes -> post-wait).
+ * - vgm_player_run_csv: CSV（相対ディレイ形式）を読み取り、ym2413_bus を駆動する。
+ * - vgm_player_run_vgm: .vgm を vgm_parser でパースし、vgm2csv と同じアルゴリズムで
+ *   ym2413_bus を駆動する（current_sample → イベント遅延 → φM ステップ →
+ *   アドレス／データ書き込み → ポストウェイト）。
  *
- * Notes:
- * - CSV format expected: delay,reg,data with delay as RELATIVE samples by default.
- * - vgm_player_run_vgm writes an inspection CSV (path.vgm.csv) when possible.
- * - Adapter uses ym2413_bus_step_phiM_cycles_adapter so the bus can attribute
- *   phiM increments to the adapter for debugging.
+ * 補足:
+ * - CSV フォーマットは delay, reg, data を想定。delay はデフォルトで相対サンプル数。
+ * - vgm_player_run_vgm は可能であれば検証用 CSV（path.vgm.csv）を書き出す。
+ * - アダプタは ym2413_bus_step_phiM_cycles_adapter を使用し、φM 増分が
+ *   アダプタ由来であることをバス側が識別できるようにする。
  */
-
 #include "vgm_player.h"
 
 #include <stdio.h>
@@ -22,7 +21,7 @@
 #include <string.h>
 #include <inttypes.h>  /* PRIu64 用 */
 
-#include "vgm_parser.h" /* parser for direct VGM parsing */
+#include "vgm_parser.h" /* VGM を直接パースするためのパーサ */
 
 /* VGM とクロックの関係（CSV と同様の前提） */
 static const double EMUCLK_HZ      = 3579545.0;
@@ -30,7 +29,7 @@ static const double VGM_RATE       = 44100.0;
 static const double EMU_PER_SAMPLE = 3579545.0 / 44100.0;  /* ≒81.2 */
 static const double PHIM_PER_SAMPLE_D = EMU_PER_SAMPLE / 4.0; /* ≒20.3 */
 
-/* Convert delay in VGM samples to φM cycles (approx) */
+/* VGM サンプル単位のディレイを φM サイクル（おおよそ）に変換する */
 static uint32_t samples_to_phiM(uint32_t delay_samples)
 {
     double phiM = (double)delay_samples * PHIM_PER_SAMPLE_D;
@@ -39,7 +38,7 @@ static uint32_t samples_to_phiM(uint32_t delay_samples)
     return r;
 }
 
-/* parse CSV line helper */
+/* CSV の 1 行をパースするためのヘルパー関数 */
 static int parse_csv_line(const char* line, vgm_csv_event_t* ev)
 {
     char* tmp = strdup(line);
@@ -80,8 +79,9 @@ static int parse_csv_line(const char* line, vgm_csv_event_t* ev)
     return 0;
 }
 
+
 /* -------------------------------------------------------------------------
- * CSV player: treat CSV delay as RELATIVE by default (compat with existing tests)
+ * CSV プレイヤー：CSV の delay はデフォルトで相対値として扱う（既存のテストとの互換性のため）
  * ------------------------------------------------------------------------- */
 int vgm_player_run_csv(const char* path, ym2413_bus_t* bus)
 {
@@ -108,11 +108,11 @@ int vgm_player_run_csv(const char* path, ym2413_bus_t* bus)
     uint64_t total_phiM    = 0;
     uint64_t event_count   = 0;
 
-    /* NOTE: CSV files in this project are relative-delay format by default.
-     * We treat ev.delay_samples AS a relative delay (delta) and do not
-     * reinterpret it as an absolute timestamp. This keeps behavior
-     * compatible with the existing test vectors.
+	/* 注意：このプロジェクト内の CSV ファイルは、デフォルトで相対ディレイ形式です。
+     * ev.delay_samples は相対ディレイ（差分）として扱い、絶対タイムスタンプとしては
+     * 解釈しません。これにより、既存のテストベクタとの動作互換性が保たれます。
      */
+
     while (fgets(line, sizeof(line), fp)) {
         if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0') continue;
 
@@ -130,7 +130,7 @@ int vgm_player_run_csv(const char* path, ym2413_bus_t* bus)
         event_count   += 1;
 
         if (phiM_delay > 0) {
-            /* use adapter wrapper so bus can attribute these steps */
+            /* アダプタ用ラッパーを使って、バス側がこれらのステップを識別できるようにする */
             ym2413_bus_step_phiM_cycles_adapter(bus, phiM_delay);
         }
 
@@ -154,19 +154,20 @@ int vgm_player_run_csv(const char* path, ym2413_bus_t* bus)
 }
 
 /* -------------------------------------------------------------------------
- * Direct VGM parsing adapter: mirrors vgm2csv behavior and also writes a CSV
- * file containing the same delay,reg,data rows for inspection.
+ * 直接 VGM をパースするアダプタ：vgm2csv の動作を模倣しつつ、
+ * 同じ delay, reg, data の行を含む CSV ファイルも検証用に出力する。
  * ------------------------------------------------------------------------- */
 
-/* Adapter context visible to parser callbacks (file scope) */
+
+/* パーサのコールバックから参照されるアダプタのコンテキスト（ファイルスコープ） */
 typedef struct {
     ym2413_bus_t *bus;
-    uint64_t current_sample;      /* absolute samples (VGM unit) */
-    uint64_t last_output_sample;  /* sample time of last emitted write */
+    uint64_t current_sample;      /* 絶対サンプル (VGM unit) */
+    uint64_t last_output_sample;  /* 最後に出力された書き込みのサンプル時刻 */
     uint64_t total_samples;
     uint64_t total_phiM;
     uint64_t event_count;
-    FILE *csv_fp;                 /* optional CSV output file (nullable) */
+    FILE *csv_fp;                 /* 任意の CSV 出力ファイル（NULL 可） */
 } vgmrun_ctx_t;
 
 static vgmrun_ctx_t *g_vgmrun_ctx = NULL;
@@ -174,14 +175,14 @@ static vgmrun_ctx_t *g_vgmrun_ctx = NULL;
 void vgm_run_vgm_set_global_ctx(void *p) { g_vgmrun_ctx = (vgmrun_ctx_t*)p; }
 void vgm_run_vgm_clear_global_ctx(void) { g_vgmrun_ctx = NULL; }
 
-/* step φM cycles for 'samples' VGM-samples */
+/* 'samples' 分の VGM サンプルに対応する φM サイクルをステップ実行する */
 static void vgmrun_step_phiM(uint32_t samples)
 {
     if (!g_vgmrun_ctx || samples == 0) return;
     vgmrun_ctx_t *c = g_vgmrun_ctx;
     uint32_t phiM = samples_to_phiM(samples);
     if (phiM > 0) {
-        /* use adapter wrapper so bus attributes these steps to adapter */
+        /* アダプタ用ラッパーを使って、バスがこれらのステップをアダプタ由来として記録できるようにする */
         ym2413_bus_step_phiM_cycles_adapter(c->bus, phiM);
         c->total_phiM += phiM;
     }
@@ -217,7 +218,7 @@ static void vgmrun_on_reg_write(void *user, VGMChipId chip,
         return;
     }
 
-    /* compute delay in samples since last output */
+    /* event_sample は、書き込みが発生する時刻（VGM サンプル単位）を表す */
     uint64_t delay_samples = 0;
     if (event_sample >= c->last_output_sample) {
         delay_samples = event_sample - c->last_output_sample;
@@ -225,38 +226,37 @@ static void vgmrun_on_reg_write(void *user, VGMChipId chip,
         delay_samples = 0;
     }
 
-    /* step the bus by delay (converted to φM) */
+    /* ディレイを φM に変換してバスをステップ実行する */
     if (delay_samples > 0) {
         vgmrun_step_phiM((uint32_t)delay_samples);
     }
 
-    /* perform address and data writes (same order as CSV-based player) */
+    /* アドレスとデータの書き込みを実行（CSV ベースのプレイヤーと同じ順序） */
     ym2413_bus_write_addr(c->bus, reg);
     ym2413_bus_write_data(c->bus, val);
     c->event_count++;
 
-    /* Also write CSV lines (if CSV file open) matching vgm2csv format */
+    /* CSV ファイルが開かれていれば、vgm2csv 形式に合わせた行も書き出す */
     if (c->csv_fp) {
-        /* use PRIu64 for delay */
+        /* delay の出力には PRIu64 を使用する */
         fprintf(c->csv_fp, "%" PRIu64 ",01,%02X\n", (uint64_t)delay_samples, reg);
         fprintf(c->csv_fp, "0,00,0x%02X\n", val);
     }
 
-    /* apply post-wait samples (if any) */
+    /* ポストウェイトのサンプルがあれば適用する */
     if (post_wait_samples) {
         vgmrun_step_phiM(post_wait_samples);
         c->current_sample += (uint64_t)post_wait_samples;
     }
 
-    /* last_output_sample should reflect the VGM timeline AFTER applying any post-wait.
-       Use the current_sample (which now includes post_wait_samples) as the new reference. */
+   /* last_output_sample は、ポストウェイト適用後の VGM タイムラインを反映すべき。
+   現在の current_sample（post_wait_samples を加算済み）を新たな基準として使用すること。 */
     c->last_output_sample = c->current_sample;
 }
 
 static void vgmrun_on_end(void *user)
 {
     (void)user;
-    /* nothing special */
 }
 
 static void vgmrun_on_unknown(void *user, uint8_t opcode, uint32_t offset)
@@ -274,10 +274,10 @@ void vgm_run_vgm_register_callbacks(VGMParserCallbacks *out_cbs)
     out_cbs->on_wait = vgmrun_on_wait;
     out_cbs->on_end = vgmrun_on_end;
     out_cbs->on_unknown = vgmrun_on_unknown;
-    out_cbs->on_data_block = NULL; /* ignore data blocks for now */
+    out_cbs->on_data_block = NULL; /* 今のところデータブロックは無視する */
 }
 
-/* Helper: build output CSV path by appending ".csv" to input path */
+/* ヘルパー：入力パスに ".csv" を付けて出力用 CSV パスを作成する */
 static char *make_vgm_csv_path(const char *vgm_path)
 {
     if (!vgm_path) return NULL;
@@ -307,13 +307,13 @@ int vgm_player_run_vgm(const char* path, ym2413_bus_t* bus)
     ctx.event_count = 0;
     ctx.csv_fp = NULL;
 
-    /* Attempt to open output CSV path for inspection */
+	/* 検証用に出力先の CSV パスを開こうとする */
     char *out_csv = make_vgm_csv_path(path);
     if (out_csv) {
         FILE *f = fopen(out_csv, "wb");
         if (f) {
             ctx.csv_fp = f;
-            /* write CSV header */
+            /* CSV のヘッダーを書き込む */
             fprintf(ctx.csv_fp, "delay,reg,data\n");
         } else {
             fprintf(stderr, "[vgm_player] unable to open CSV output: %s (continuing without csv file)\n", out_csv);
@@ -324,17 +324,17 @@ int vgm_player_run_vgm(const char* path, ym2413_bus_t* bus)
     VGMParserCallbacks cbs;
     memset(&cbs, 0, sizeof(cbs));
 
-    /* set global context for callbacks and register them */
+    /* コールバック用のグローバルコンテキストを設定し、コールバックを登録する */
     vgm_run_vgm_set_global_ctx(&ctx);
     vgm_run_vgm_register_callbacks(&cbs);
 
-    /* parse file (parser will call our callbacks) */
+    /* ファイルをパースする（パーサがこちらのコールバックを呼び出す） */
     int rc = vgm_parse_file(path, &cbs, &ctx);
 
-    /* clear global context */
+    /* グローバルコンテキストをクリアする */
     vgm_run_vgm_clear_global_ctx();
 
-    /* close CSV if open */
+    /* CSV が開かれていれば閉じる */
     if (ctx.csv_fp) {
         fclose(ctx.csv_fp);
         ctx.csv_fp = NULL;

@@ -38,10 +38,11 @@ void ym2413_bus_init(ym2413_bus_t* bus);
 /* φM ステップを n 回分進める（phiMref / phiM_cnt / clkdiv を TB と同じように更新） */
 void ym2413_bus_step_phiM_cycles(ym2413_bus_t* bus, uint32_t n_phiM);
 
-/* Adapter-marked wrapper: call this from player/parser when stepping the bus.
- * It marks the subsequent stepping as "adapter-initiated" so debug counters
- * can separate adapter vs internal stepping.
+ /* アダプタ用のマーク付きラッパー：バスをステップ実行する際に、プレイヤーやパーサーからこれを呼び出す。
+ * この呼び出しは「アダプタによるステップ実行」としてマークされるため、
+ * デバッグ用カウンタがアダプタ起因と内部処理起因のステップを区別できる。
  */
+
 void ym2413_bus_step_phiM_cycles_adapter(ym2413_bus_t* bus, uint32_t n_phiM);
 
 /* アドレス書き込み（WAIT 管理込み、TB の IKAOPLL_write(ADDR) 相当） */
@@ -58,22 +59,29 @@ void ym2413_bus_acc_log_close(void);
 void ym2413_bus_mo_log_open(const char* path);
 void ym2413_bus_mo_log_close(void);
 
-/* Audio sampling log (optional) */
+/* オーディオサンプリングのログ出力 (オプション) */
 void ym2413_bus_audio_log_open(const char* path);
 void ym2413_bus_audio_log_close(void);
 
-/* ---------------------------------------------------------------------
- * Debug / access logging API (added)
+/* 出力のベース名を設定する（拡張子なしの本体部分のみ）。
+ * 設定されていれば、オーディオ CSV は "<base>.csv"、WAV は "<base>.wav" に出力される。
+ * 設定されていなければ、デフォルト（"audio_samples.csv" / "audio_samples.wav"）が使われる。
+ */
+void ym2413_bus_set_output_basename(const char* base);
+
+ /* ---------------------------------------------------------------------
+ * デバッグ／アクセスログ用 API（追加分）
  *
- * - ym2413_bus_debug_open(path): open CSV debug log (if NULL/failed, logging disabled)
- * - ym2413_bus_debug_close(): close debug log and print summary on stderr
+ * - ym2413_bus_debug_open(path): CSV デバッグログを開く（NULL または失敗時はロギング無効）
+ * - ym2413_bus_debug_close(): デバッグログを閉じ、stderr にサマリを出力する
  *
- * CSV format (one line per write call):
- *   access_idx,phiM_cnt,delta_phiM,approx_samples,op,value_hex
- *   e.g. 1,12345,64,3,ADDR,0x10
+ * CSV フォーマット（1 行につき 1 回の書き込み）:
+ *   access_idx, phiM_cnt, delta_phiM, approx_samples, op, value_hex
+ *   例: 1,12345,64,3,ADDR,0x10
  *
- * Getters return collected statistics.
+ * ゲッター関数は収集された統計情報を返す。
  * --------------------------------------------------------------------- */
+
 void ym2413_bus_debug_open(const char* path);
 void ym2413_bus_debug_close(void);
 

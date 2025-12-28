@@ -5,10 +5,17 @@
 #include <cstring>
 #include <string>
 #include <inttypes.h>
+#include <vector>
+#include <algorithm>
 
 #include "verilated.h"
 #include "VIKAOPLL.h"
 #include "verilated_vcd_c.h"
+
+/* WAV writer (C API) - include under extern "C" for C++ linkage */
+extern "C" {
+#include "wav_writer.h"
+}
 
 /*-------------------------------------------------------------------------
  * グローバルな Verilated モデルインスタンス
@@ -92,6 +99,70 @@ static void eval_tick()
 }
 
 /*-------------------------------------------------------------------------
+ * WAV データをメモリ上に収集しておき、クローズ時に決定論的な WAV を書き出せるようにする。
+ * mo_signed の生サンプルを保持しており（リスニング用に16ビットにスケーリングされている）。
+ *------------------------------------------------------------------------*/
+static bool            g_wav_enabled = false;
+static int             g_wav_sample_rate = 44100;
+static std::vector<int16_t> g_wav_samples;
+/* 呼び出し元が指定した出力 WAV パスを保存する（デフォルトは "audio_samples.wav"） */
+static std::string     g_wav_outpath = "audio_samples.wav";
+
+void ikaopll_audio_wav_open(const char* path, int sample_rate)
+{
+    if (g_wav_enabled) return;
+    g_wav_samples.clear();
+    g_wav_sample_rate = sample_rate > 0 ? sample_rate : 44100;
+    if (path && path[0] != '\0') {
+        g_wav_outpath.assign(path);
+    } else {
+        g_wav_outpath.assign("audio_samples.wav");
+    }
+    g_wav_enabled = true;
+}
+
+void ikaopll_audio_wav_write(int16_t mo_signed, int16_t acc_signed)
+{
+    (void)acc_signed; /* 現在は WAV では未使用（mo_signed からのモノラル出力） */
+    if (!g_wav_enabled) return;
+	/* mo_signed を可聴レベルにスケーリングする。 レンジが小さい場合（例：±512）、16ビットを埋めるように倍率をかける。 */
+	/* オーバーフローを防ぐためにクランプを使う。 */
+    const int scale = 64; // heuristic: 512*64 ~= 32768
+    int32_t v = (int32_t)mo_signed * scale;
+    if (v > 32767) v = 32767;
+    if (v < -32768) v = -32768;
+    g_wav_samples.push_back((int16_t)v);
+}
+
+void ikaopll_audio_wav_close(void)
+{
+    if (!g_wav_enabled) return;
+
+    const char* outpath_c = g_wav_outpath.c_str();
+    if (g_wav_samples.size() > 0) {
+        /* 最後に wav_write_mono16 を使って WAV を一括書き出しする */
+        int rc = wav_write_mono16(outpath_c, g_wav_samples.data(), g_wav_samples.size(), g_wav_sample_rate);
+        if (rc != 0) {
+            std::fprintf(stderr, "ikaopll_audio_wav_close: wav_write_mono16 failed for %s\n", outpath_c);
+        } else {
+            std::printf("WAV written: %s (%zu samples @ %d Hz)\n", outpath_c, g_wav_samples.size(), g_wav_sample_rate);
+        }
+    } else {
+        /*  サンプル数がゼロでも空の WAV ヘッダを作成する */
+        int rc = wav_write_mono16(outpath_c, NULL, 0, g_wav_sample_rate);
+        if (rc != 0) {
+            std::fprintf(stderr, "ikaopll_audio_wav_close: wav_write_mono16(empty) failed for %s\n", outpath_c);
+        } else {
+            std::printf("WAV written (empty): %s\n", outpath_c);
+        }
+    }
+    g_wav_samples.clear();
+    g_wav_enabled = false;
+    /* 次回の実行に備えて出力パスをデフォルトにリセットする */
+    g_wav_outpath.assign("audio_samples.wav");
+}
+
+/*-------------------------------------------------------------------------
  * 初期化・終了
  *------------------------------------------------------------------------*/
 
@@ -139,6 +210,7 @@ void ikaopll_release(void)
     }
 
     ikaopll_mo_change_log_close();
+    ikaopll_audio_wav_close();
 }
 
 void ikaopll_trace_init(const char* vcd_filename)

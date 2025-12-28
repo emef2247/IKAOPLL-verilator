@@ -1,29 +1,30 @@
 /*
  * vgm_parser.c
  *
- * Implementation of a careful VGM parser that invokes host callbacks for
- * register writes and waits. This file contains ONLY the parsing logic:
+ * レジスタ書き込みやウェイトに対してホスト側のコールバックを呼び出す、
+ * 慎重な VGM パーサの実装。
+ * このファイルには **パース処理のロジックのみ** を含む：
  * - vgm_parse_buffer()
  * - vgm_parse_file()
  *
- * Adapter / runtime functions (vgm_player_run_vgm, callback registration,
- * etc.) must live in vgm_player.c to avoid duplicate symbol definitions.
+ * アダプタやランタイム関数（vgm_player_run_vgm やコールバック登録など）は、
+ * シンボルの重複定義を避けるために vgm_player.c に実装すること。
  */
-
 #include "vgm_parser.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* Helper for reading little-endian 32-bit from buffer */
+/* バッファからリトルエンディアンの 32 ビット値を読み取るヘルパー */
 static uint32_t read_le_u32_from_buf(const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-/* Table of known fixed-length commands (code, total_length_in_bytes).
- * Mirrors the idea in eseopl3patcher main.c's kKnownFixedCmds. Add entries
- * here as needed so the parser can skip them safely.
+ /* 既知の固定長コマンドのテーブル（コード, 全体のバイト長）。
+ * eseopl3patcher の main.c にある kKnownFixedCmds の考え方を踏襲。
+ * パーサが安全にスキップできるよう、必要に応じてここにエントリを追加すること。
  */
+
 typedef struct {
     uint8_t code;
     uint8_t length; /* total length including opcode */
@@ -32,10 +33,10 @@ typedef struct {
 static const KnownFixedCmd kKnownFixedCmds[] = {
     {0xA0, 3}, /* AY8910: opcode + port + value */
     {0xD2, 4}, /* K051649 (example) */
-    /* Add more fixed-length non-OPL commands here if needed */
+	/* 必要に応じて、固定長の非 OPL コマンドをここに追加すること */
 };
 
-/* Find known fixed command spec, or NULL */
+/* 指定された固定長コマンドの情報を探す。見つからなければ NULL を返す */
 static const KnownFixedCmd* find_known_fixed(uint8_t code) {
     for (size_t i = 0; i < sizeof(kKnownFixedCmds)/sizeof(kKnownFixedCmds[0]); ++i) {
         if (kKnownFixedCmds[i].code == code) return &kKnownFixedCmds[i];
@@ -43,8 +44,8 @@ static const KnownFixedCmd* find_known_fixed(uint8_t code) {
     return NULL;
 }
 
-/* Map an opcode that indicates a YM-family register write to VGMChipId.
- * For 0x51..0x5C we map specifically.
+/* YM 系レジスタ書き込みを示すオペコードを VGMChipId にマッピングする。
+ * 0x51〜0x5C は個別にマッピングされる。
  */
 static VGMChipId opcode_to_chip(uint8_t opcode) {
     switch (opcode) {
@@ -61,35 +62,35 @@ static VGMChipId opcode_to_chip(uint8_t opcode) {
     }
 }
 
-/* Internal core parse routine operating on a buffer. */
+/* バッファ上で動作する内部のコアパース処理ルーチン */
 int vgm_parse_buffer(const uint8_t *buf, size_t bufsize, const VGMParserCallbacks *cbs, void *user) {
     if (!buf || bufsize < 0x40) return -1;
     if (!cbs) return -1;
 
-    /* Validate VGM header magic */
+	/* VGM ヘッダーのマジック値を検証する */
     if (memcmp(buf, "Vgm ", 4) != 0) {
         return -2;
     }
 
-    /* Compute data offset from header (offset at 0x34, little endian) */
+	/* ヘッダーからデータオフセットを計算する（0x34 の位置にあるリトルエンディアン値） */
     uint32_t data_offset_field = read_le_u32_from_buf(buf + 0x34);
-    /* Per VGM spec: if DataOffset == 0 then use 0x0C (compat) */
+	/* VGM仕様に従い、DataOffset が 0 の場合は互換性のために 0x0C を使用する */
     if (data_offset_field == 0) data_offset_field = 0x0C;
     uint32_t header_size = 0x34 + data_offset_field;
     if (header_size < 0x40) header_size = 0x40;
     uint32_t data_start = 0x34 + data_offset_field;
     if (data_start >= bufsize) return -3;
 
-    /* Start parsing commands */
+	/* コマンドのパースを開始 */
     size_t pos = data_start;
     while (pos < bufsize) {
         uint8_t cmd = buf[pos];
 
-        /* YM2413 (0x51) and other YM-family writes (0x5A/0x5B/0x5C) */
+		/* YM2413（0x51）および他の YM 系チップへの書き込み（0x5A / 0x5B / 0x5C） */
         if (cmd == 0x51 || cmd == 0x5A || cmd == 0x5B || cmd == 0x5C) {
-            /* needs 3 bytes: opcode, reg, val */
+			/* 3バイト必要：オペコード、レジスタ、値 */
             if (pos + 2 >= bufsize) {
-                /* truncated */
+				/* データが途中で終わっている */
                 if (cbs->on_unknown) cbs->on_unknown(user, cmd, (uint32_t)pos);
                 break;
             }
@@ -97,7 +98,7 @@ int vgm_parse_buffer(const uint8_t *buf, size_t bufsize, const VGMParserCallback
             uint8_t val = buf[pos + 2];
             pos += 3;
 
-            /* peek for immediate post-wait encoded right after a write */
+			/* 書き込み直後にエンコードされた即時ウェイトを先読みする */
             uint32_t post_wait_samples = 0;
             if (pos < bufsize) {
                 uint8_t peek = buf[pos];
@@ -116,7 +117,7 @@ int vgm_parse_buffer(const uint8_t *buf, size_t bufsize, const VGMParserCallback
                 }
             }
 
-            /* dispatch callback */
+			/* コールバックを呼び出す（ディスパッチ） */
             if (cbs->on_reg_write) {
                 VGMChipId chip = opcode_to_chip(cmd);
                 cbs->on_reg_write(user, chip, reg, val, post_wait_samples);
@@ -124,7 +125,7 @@ int vgm_parse_buffer(const uint8_t *buf, size_t bufsize, const VGMParserCallback
             continue;
         }
 
-        /* PSG / SN76489 style data (0x50 : single byte payload) */
+		/* PSG / SN76489 系のデータ（0x50：1バイトのペイロード） */
         if (cmd == 0x50) {
             if (pos + 1 >= bufsize) {
                 if (cbs->on_unknown) cbs->on_unknown(user, cmd, (uint32_t)pos);
@@ -138,7 +139,7 @@ int vgm_parse_buffer(const uint8_t *buf, size_t bufsize, const VGMParserCallback
             continue;
         }
 
-        /* OPN-like passthroughs that use 3 bytes (opcode, reg, val) */
+		/* OPN系のパススルー命令（3バイト：オペコード、レジスタ、値） */
         if (cmd == 0x52 || (cmd >= 0x54 && cmd <= 0x57)) {
             if (pos + 2 >= bufsize) {
                 if (cbs->on_unknown) cbs->on_unknown(user, cmd, (uint32_t)pos);
@@ -153,7 +154,7 @@ int vgm_parse_buffer(const uint8_t *buf, size_t bufsize, const VGMParserCallback
             continue;
         }
 
-        /* Wait short 0x70 - 0x7F: 1..16 samples */
+		/* 短いウェイト 0x70〜0x7F：1〜16 サンプル分の待機 */
         if (cmd >= 0x70 && cmd <= 0x7F) {
             pos += 1;
             uint32_t samples = (cmd & 0x0F) + 1;
@@ -161,7 +162,7 @@ int vgm_parse_buffer(const uint8_t *buf, size_t bufsize, const VGMParserCallback
             continue;
         }
 
-        /* Wait 0x61: 16-bit little-endian sample count */
+		/* ウェイト 0x61：16ビット リトルエンディアンのサンプル数で待機 */
         if (cmd == 0x61) {
             if (pos + 2 >= bufsize) {
                 if (cbs->on_unknown) cbs->on_unknown(user, cmd, (uint32_t)pos);
@@ -173,7 +174,7 @@ int vgm_parse_buffer(const uint8_t *buf, size_t bufsize, const VGMParserCallback
             continue;
         }
 
-        /* Wait 60Hz / 50Hz */
+		/* 60Hz / 50Hz のウェイト */
         if (cmd == 0x62) {
             pos += 1;
             if (cbs->on_wait) cbs->on_wait(user, 735);
@@ -185,14 +186,14 @@ int vgm_parse_buffer(const uint8_t *buf, size_t bufsize, const VGMParserCallback
             continue;
         }
 
-        /* End of data */
+		/* データの終わり */
         if (cmd == 0x66) {
             pos += 1;
             if (cbs->on_end) cbs->on_end(user);
             break;
         }
 
-        /* Data block 0x67: read type + 4-byte size + payload */
+		/* データブロック 0x67：タイプ + 4バイトのサイズ + ペイロードを読み込む */
         if (cmd == 0x67) {
             if (pos + 6 > bufsize) {
                 if (cbs->on_unknown) cbs->on_unknown(user, cmd, (uint32_t)pos);
@@ -212,7 +213,7 @@ int vgm_parse_buffer(const uint8_t *buf, size_t bufsize, const VGMParserCallback
             continue;
         }
 
-        /* Data block type 0x68 - skip conservatively */
+		/* データブロックタイプ 0x68：慎重にスキップする */
         if (cmd == 0x68) {
             if (pos + 1 >= bufsize) {
                 if (cbs->on_unknown) cbs->on_unknown(user, cmd, (uint32_t)pos);
@@ -223,7 +224,7 @@ int vgm_parse_buffer(const uint8_t *buf, size_t bufsize, const VGMParserCallback
             continue;
         }
 
-        /* Known fixed-length commands (safe skip) */
+		/* 既知の固定長コマンド（安全にスキップ可能） */
         const KnownFixedCmd *spec = find_known_fixed(cmd);
         if (spec) {
             if (pos + spec->length > bufsize) {
@@ -234,7 +235,7 @@ int vgm_parse_buffer(const uint8_t *buf, size_t bufsize, const VGMParserCallback
             continue;
         }
 
-        /* Unknown fallback: warn and advance by one byte */
+		/* 未知の命令：警告を出して1バイトだけ進める */
         if (cbs->on_unknown) cbs->on_unknown(user, cmd, (uint32_t)pos);
         pos += 1;
     }
@@ -242,7 +243,7 @@ int vgm_parse_buffer(const uint8_t *buf, size_t bufsize, const VGMParserCallback
     return 0;
 }
 
-/* Read file into memory and call buffer-based parser */
+/* ファイルをメモリに読み込んで、バッファベースのパーサーを呼び出す */
 int vgm_parse_file(const char *path, const VGMParserCallbacks *cbs, void *user) {
     if (!path) return -1;
     FILE *f = fopen(path, "rb");

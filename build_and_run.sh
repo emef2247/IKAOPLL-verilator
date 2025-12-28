@@ -43,7 +43,7 @@ verilator \
   "${SRC_DIR}/vgm_parser.c" \
   "${SRC_DIR}/wav_writer.c" \
   "${SRC_DIR}/main_vgm_csv.c" \
-  -CFLAGS "-O2 -DHAVE_VERILATED_FST_C -I${VERILATOR_INCLUDE}" \
+  -CFLAGS "-O3 -march=native -flto -DHAVE_VERILATED_FST_C -I${VERILATOR_INCLUDE}" \
   -o ikaopll_sim
 
 # Build using generated Makefile
