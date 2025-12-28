@@ -1,3 +1,4 @@
+cat > tools/create_rtl_dir.sh <<'EOF'
 #!/usr/bin/env bash
 # Create rtl/ structure and populate IKAOPLL sources.
 # Usage:
@@ -117,9 +118,10 @@ to_raw_base() {
   # If contains github.com and /blob/, transform:
   if [[ "$blob" =~ github.com/ ]] && [[ "$blob" =~ /blob/ ]]; then
     # replace "https://github.com/" -> "https://raw.githubusercontent.com/"
-    # and remove the "blob/" path segment
+    # and replace "/blob/<branch>" by "/<branch>"
+    # e.g. https://github.com/user/repo/blob/main -> https://raw.githubusercontent.com/user/repo/main
     local raw
-    raw=$(echo "$blob" | sed -e 's#https://github.com/#https://raw.githubusercontent.com/#' -e 's#/blob/##')
+    raw=$(echo "$blob" | sed -e 's#^https://github.com/#https://raw.githubusercontent.com/#' -e 's#/blob/#/#')
     echo "$raw"
   else
     # assume already a raw base
@@ -166,3 +168,6 @@ echo "You can populate it with:"
 echo "  $progname --from-dir /path/to/IKAOPLL-sources"
 echo "  $progname --fetch-raw https://github.com/owner/repo/blob/branch"
 exit 0
+EOF
+
+chmod +x tools/create_rtl_dir.sh

@@ -61,7 +61,7 @@ shift 1 || true
 # Default: do NOT produce CSV unless explicitly requested.
 enable_trace=false
 trace_file="ikaopll_dump.vcd"
-trace_fmt="vcd"   # vcd or fst
+trace_vcd="vcd"   # vcd 
 
 enable_csv=false   # <-- default: disabled (equivalent to --no-csv)
 enable_debug=false
@@ -72,14 +72,7 @@ for arg in "$@"; do
   case "$arg" in
     --vcd)
       enable_trace=true
-      trace_fmt="vcd"
-      ;;
-    --fst)
-      enable_trace=true
-      trace_fmt="fst"
-      ;;
-    --trace-fmt)
-      enable_trace=true
+      trace_vcd="vcd"
       ;;
     --no-csv)
       enable_csv=false
@@ -108,7 +101,7 @@ echo "IKAOPLL-verilator: YM2413 bus + VGM CSV player"
 printf "  INPUT: %s\n" "${SIM_INPUT}"
 printf "  Input type: %s\n" "${input_type}"
 if [ "${enable_trace}" = true ]; then
-  printf "  Trace: enabled (format=%s) -> %s\n" "${trace_fmt}" "${trace_file}"
+  printf "  Trace: enabled (format=%s) -> %s\n" "${trace_vcd}" "${trace_file}"
 else
   printf "  Trace: disabled\n"
 fi
