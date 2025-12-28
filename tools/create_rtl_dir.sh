@@ -1,3 +1,4 @@
+cat > tools/create_rtl_dir.sh <<'EOF'
 #!/usr/bin/env bash
 # Create rtl/ structure and populate IKAOPLL sources.
 # Usage:
@@ -167,3 +168,6 @@ echo "You can populate it with:"
 echo "  $progname --from-dir /path/to/IKAOPLL-sources"
 echo "  $progname --fetch-raw https://github.com/owner/repo/blob/branch"
 exit 0
+EOF
+
+chmod +x tools/create_rtl_dir.sh

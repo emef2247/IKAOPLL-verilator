@@ -61,7 +61,11 @@ shift 1 || true
 # Default: do NOT produce CSV unless explicitly requested.
 enable_trace=false
 trace_file="ikaopll_dump.vcd"
+<<<<<<< HEAD
 trace_vcd="vcd"   # vcd or fst
+=======
+trace_vcd="vcd"   # vcd 
+>>>>>>> feature/verilator-tb
 
 enable_csv=false   # <-- default: disabled (equivalent to --no-csv)
 enable_debug=false
