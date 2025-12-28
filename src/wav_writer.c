@@ -3,6 +3,11 @@
 #include <stdio.h>
 #include <string.h>
 
+/* If compiled as C++ translation unit, ensure definitions use C linkage */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* RIFF/WAVE ヘッダを書き出す */
 static void write_wav_header(FILE* fp, int32_t sample_rate, int32_t num_samples)
 {
@@ -85,3 +90,7 @@ int wav_writer_close(wav_writer_t* w)
     w->fp = NULL;
     return 0;
 }
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
