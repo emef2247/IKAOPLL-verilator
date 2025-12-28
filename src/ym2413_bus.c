@@ -76,12 +76,30 @@ static uint64_t g_bus_max_duration = 0;
 static uint64_t g_bus_total_duration = 0;       /* sum of durations (phiM) */
 
 /* -------------------------------------------------------------------------
- * New: phiM totals and adapter/internal split
+ *  phiM totals and adapter/internal split
  * -------------------------------------------------------------------------*/
 static uint64_t g_debug_total_phiM = 0;                /* total phiM increments observed */
 static uint64_t g_debug_total_phiM_adapter = 0;        /* increments attributed to adapter calls */
 static uint64_t g_debug_total_phiM_internal = 0;       /* increments attributed to internal waits */
 static int      g_debug_flag_current_step_from_adapter = 0; /* set by adapter wrapper */
+
+/* Output basename for audio files (no extension). Empty => use defaults */
+static char g_output_basename[PATH_MAX] = "";
+
+/* Set output basename (copy, no extension). If base == NULL or empty, clears override. */
+void ym2413_bus_set_output_basename(const char* base)
+{
+    if (!base || base[0] == '\0') {
+        g_output_basename[0] = '\0';
+        return;
+    }
+    /* copy up to PATH_MAX-1 */
+    size_t n = strlen(base);
+    if (n >= sizeof(g_output_basename)) n = sizeof(g_output_basename)-1;
+    memcpy(g_output_basename, base, n);
+    g_output_basename[n] = '\0';
+}
+
 
 /*=========================================================================
  * 内部ヘルパ: cluster を出力してクリア
@@ -270,14 +288,34 @@ void ym2413_bus_audio_log_open(const char* path)
 {
     if (g_audio_fp) return;
 
-    g_audio_fp = fopen(path, "w");
+    /* CSV の出力パスを決定する：g_output_basename が設定されていればそれを優先し、なければ指定されたパス、またはデフォルトを使用する */
+    char csv_path[PATH_MAX];
+    if (g_output_basename[0] != '\0') {
+        snprintf(csv_path, sizeof(csv_path), "%s.csv", g_output_basename);
+    } else if (path && path[0] != '\0') {
+        snprintf(csv_path, sizeof(csv_path), "%s", path);
+    } else {
+        snprintf(csv_path, sizeof(csv_path), "%s", "audio_samples.csv");
+    }
+
+    g_audio_fp = fopen(csv_path, "w");
     if (!g_audio_fp) {
-        fprintf(stderr, "[ym2413_bus] failed to open audio log file: %s\n", path);
+        fprintf(stderr, "[ym2413_bus] failed to open audio log file: %s\n", csv_path);
         return;
     }
 
     fprintf(g_audio_fp, "t_ps,mo_signed,acc_signed\n");
     g_audio_log_count = 0;
+
+    /* ベース名が指定されていればそれを使って WAV 出力を開き、なければデフォルトを使用する */
+    char wav_path[PATH_MAX];
+    if (g_output_basename[0] != '\0') {
+        snprintf(wav_path, sizeof(wav_path), "%s.wav", g_output_basename);
+    } else {
+        snprintf(wav_path, sizeof(wav_path), "%s", "audio_samples.wav");
+    }
+    /* WAV 収集を開始するためのラッパー API を呼び出す */
+    ikaopll_audio_wav_open(wav_path, (int)AUDIO_SAMPLE_RATE);
 }
 
 void ym2413_bus_audio_log_close(void)
@@ -288,6 +326,9 @@ void ym2413_bus_audio_log_close(void)
                 g_audio_log_count);
         g_audio_fp = NULL;
     }
+
+    /* WAV writer のクローズ */
+    ikaopll_audio_wav_close();
 }
 
 /*=========================================================================
@@ -430,6 +471,9 @@ void ym2413_bus_step_phiM_cycles(ym2413_bus_t* bus, uint32_t n_phiM)
                 fprintf(g_audio_fp, "%" PRIu64 ",%d,%d\n", g_audio_next_sample_tps, (int)mo_signed, (int)acc_signed);
                 g_audio_log_count++;
 
+				/* --- also write deterministic WAV sample (listening) --- */
+                ikaopll_audio_wav_write(mo_signed, acc_signed);
+				
                 /* 次サンプル時刻へ */
                 g_audio_next_sample_tps += g_audio_sample_period_ps;
             }

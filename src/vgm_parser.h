@@ -1,36 +1,19 @@
 /*
  * vgm_parser.h
- *
- * VGM parser that calls back into the host (simulator/player) for
- * register writes and wait events. The parser is designed to be a
- * faithful, careful reimplementation of the VGM command handling
- * approach used in eseopl3patcher (src/main.c) so that byte offsets
- * and skips match precisely and do not desynchronize streamed parsing.
- *
- * The parser itself is agnostic about how the host consumes events;
- * the host must provide callbacks to receive writes/waits/end/unknown.
- *
- * Usage:
+ * 使用例：
  *   VGMParserCallbacks cb = { ... };
  *   int rc = vgm_parse_file(path, &cb, userptr);
  *
- * The parser will:
- *  - parse header and find DataOffset/data start
- *  - honor loop offset fields (reads them for completeness; loop behaviour
- *    is not enforced by the parser itself)
- *  - recognize common VGM opcodes (reg writes, waits, data blocks)
- *  - for fixed-length unknown-but-known opcodes it will skip the correct
- *    number of bytes (kKnownFixedCmds table)
- *  - for variable-length data blocks (0x67) it will read the length field
- *    and skip exactly that many bytes
- *  - for completely unknown opcodes not in the fixed table it will
- *    issue an unknown callback and advance by 1 byte (safe forward)
+ * パーサの動作：
+ *  - ヘッダーを解析し、DataOffset／データ開始位置を特定
+ *  - ループオフセットも読み取る（パーサ自体はループ処理を行わない）
+ *  - 一般的な VGM オペコード（レジスタ書き込み、ウェイト、データブロック）を認識
+ *  - 固定長の「未知だが既知の」オペコードについては、正しいバイト数をスキップ（kKnownFixedCmds テーブル）
+ *  - 可変長のデータブロック（0x67）は、長さフィールドを読み取り、正確なバイト数をスキップ
+ *  - 完全に未知なオペコードは unknown コールバックを呼び出し、1 バイトだけ進めて安全に継続
  *
- * This header and parser intentionally do not directly couple to a
- * particular YM/OPL bus API. Callbacks let the main program decide how to
- * map events (e.g., to the existing CSV-based player API or to direct
- * IKAOPLL calls).
  */
+
 
 #ifndef VGM_PARSER_H
 #define VGM_PARSER_H
@@ -56,57 +39,63 @@ typedef enum {
 
 /* Callback set the host must provide */
 typedef struct VGMParserCallbacks {
-    /* Called when a register write is parsed.
-     * user: user-supplied pointer
-     * chip: VGMChipId
-     * reg, val: register and value bytes from VGM
-     * post_wait_samples: if the command is immediately followed by an
-     *                    embedded wait (VGM often places a wait opcode
-     *                    right after a register write), that number of
-     *                    samples is returned here. The host may choose
-     *                    to handle the write+wait together or separate them.
-     */
+    /* レジスタ書き込みがパースされたときに呼び出される。
+	 *
+	 * user: ユーザーが指定したポインタ
+	 * chip: VGMChipId（チップの識別子）
+	 * reg, val: VGM から読み取ったレジスタと値のバイト
+	 * post_wait_samples: このコマンドの直後にウェイト命令が埋め込まれている場合、
+	 *                    そのサンプル数がここに返される。
+	 *                    （VGM ではレジスタ書き込み直後にウェイトを置くことが多い）
+	 *                    ホスト側は、書き込み＋ウェイトをまとめて処理しても、
+	 *                    別々に扱ってもよい。
+	 */
     void (*on_reg_write)(void *user, VGMChipId chip,
                          uint8_t reg, uint8_t val,
                          uint32_t post_wait_samples);
 
-    /* Called when a wait command is parsed.
-     * user: user-supplied pointer
-     * samples: number of audio samples to wait (e.g., 735, 882, or 1..16)
-     */
+	/* ウェイトコマンドがパースされたときに呼び出される。
+	 *
+	 * user: ユーザーが指定したポインタ
+	 * samples: 待機するオーディオサンプル数（例：735、882、または 1〜16 など）
+	 */
     void (*on_wait)(void *user, uint32_t samples);
 
-    /* Called when an end-of-data (0x66) is seen */
+    /* データ終端（0x66）が現れたときに呼び出される */
     void (*on_end)(void *user);
 
-    /* Called for unknown opcodes (one byte forwarded). Useful for logging.
-     * user: user pointer
-     * opcode: the unknown opcode
-     * offset: file offset where the opcode was found
-     */
+	/* 未知のオペコードに対して呼び出される（1 バイトだけ進める）。
+	 * ログ出力などに便利。
+	 *
+	 * user: ユーザー指定のポインタ
+	 * opcode: 未知のオペコード
+	 * offset: そのオペコードが見つかったファイル上のオフセット
+	 */
     void (*on_unknown)(void *user, uint8_t opcode, uint32_t offset);
 
-    /* Optional: called when a data-block is encountered (0x67).
-     * type_byte: the data block type byte (following 0x67)
-     * data_ptr: pointer to data payload (may be NULL if host doesn't need it).
-     * data_size: size of the payload in bytes.
-     *
-     * If this callback is NULL, parser will still skip the block safely.
-     */
+	/* オプション：データブロック（0x67）に遭遇したときに呼び出される。
+	 *
+	 * type_byte: 0x67 に続くデータブロックのタイプバイト
+	 * data_ptr: データ本体へのポインタ（ホストが必要としない場合は NULL の可能性あり）
+	 * data_size: データ本体のサイズ（バイト単位）
+	 *
+	 * このコールバックが NULL の場合でも、パーサは安全にブロックをスキップする。
+	 */
     void (*on_data_block)(void *user, uint8_t type_byte,
                           const uint8_t *data_ptr, uint32_t data_size);
 } VGMParserCallbacks;
 
-/* Parse the given VGM file path and invoke callbacks as events are parsed.
- * Returns 0 on success, non-zero on error.
+/* オプション：データブロック（0x67）に遭遇したときに呼び出される。
  *
- * The parser performs bounds-checking and avoids overruns. It reads
- * the VGM header to find the data offset and loop offset and then
- * iterates through the data region until EOF or 0x66 end command.
+ * type_byte: 0x67 に続くデータブロックのタイプバイト
+ * data_ptr: データ本体へのポインタ（ホストが不要なら NULL の可能性あり）
+ * data_size: データ本体のバイト数
+ *
+ * このコールバックが NULL の場合でも、パーサは安全にブロックをスキップする。
  */
 int vgm_parse_file(const char *path, const VGMParserCallbacks *cbs, void *user);
 
-/* Parse a memory buffer (already read) with given size. Same semantics. */
+/* すでに読み込まれたメモリバッファを、指定サイズでパースする。同じセマンティクス。 */
 int vgm_parse_buffer(const uint8_t *buf, size_t bufsize, const VGMParserCallbacks *cbs, void *user);
 
 #ifdef __cplusplus
