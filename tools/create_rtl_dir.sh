@@ -117,9 +117,10 @@ to_raw_base() {
   # If contains github.com and /blob/, transform:
   if [[ "$blob" =~ github.com/ ]] && [[ "$blob" =~ /blob/ ]]; then
     # replace "https://github.com/" -> "https://raw.githubusercontent.com/"
-    # and remove the "blob/" path segment
+    # and replace "/blob/<branch>" by "/<branch>"
+    # e.g. https://github.com/user/repo/blob/main -> https://raw.githubusercontent.com/user/repo/main
     local raw
-    raw=$(echo "$blob" | sed -e 's#https://github.com/#https://raw.githubusercontent.com/#' -e 's#/blob/##')
+    raw=$(echo "$blob" | sed -e 's#^https://github.com/#https://raw.githubusercontent.com/#' -e 's#/blob/#/#')
     echo "$raw"
   else
     # assume already a raw base
