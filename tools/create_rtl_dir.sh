@@ -1,4 +1,3 @@
-cat > tools/create_rtl_dir.sh <<'EOF'
 #!/usr/bin/env bash
 # Create rtl/ structure and populate IKAOPLL sources.
 # Usage:
@@ -11,23 +10,6 @@ cat > tools/create_rtl_dir.sh <<'EOF'
 #
 set -eu
 progname=$(basename "$0")
-
-print_usage() {
-  cat <<EOF
-$progname - prepare rtl/ directory for IKAOPLL sources
-
-Usage:
-  $progname [--from-dir PATH] [--fetch-raw GITHUB_BLOB_BASE] [--force] [--help]
-
-Options:
-  --from-dir PATH     Copy files from a local directory.
-  --fetch-raw URL     Provide GitHub blob base, e.g.
-                      https://github.com/ika-musume/IKAOPLL/blob/main
-                      (script will translate to the corresponding raw URLs)
-  --force             Overwrite existing files in rtl/.
-  --help              Show this message.
-EOF
-}
 
 TOP_FILES=(
   "IKAOPLL.v"
@@ -168,6 +150,3 @@ echo "You can populate it with:"
 echo "  $progname --from-dir /path/to/IKAOPLL-sources"
 echo "  $progname --fetch-raw https://github.com/owner/repo/blob/branch"
 exit 0
-EOF
-
-chmod +x tools/create_rtl_dir.sh
