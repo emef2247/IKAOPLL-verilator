@@ -107,12 +107,18 @@ static int             g_wav_sample_rate = 44100;
 static std::vector<int16_t> g_wav_samples;
 /* 呼び出し元が指定した出力 WAV パスを保存する（デフォルトは "audio_samples.wav"） */
 static std::string     g_wav_outpath = "audio_samples.wav";
+static uint64_t        g_wav_nonzero_acc_count = 0;
+static uint64_t        g_wav_nonzero_mo_count = 0;
+static bool            g_wav_force_mo_fallback = false;
 
 void ikaopll_audio_wav_open(const char* path, int sample_rate)
 {
     if (g_wav_enabled) return;
     g_wav_samples.clear();
     g_wav_sample_rate = sample_rate > 0 ? sample_rate : 44100;
+    g_wav_nonzero_acc_count = 0;
+    g_wav_nonzero_mo_count = 0;
+    g_wav_force_mo_fallback = false;
     if (path && path[0] != '\0') {
         g_wav_outpath.assign(path);
     } else {
@@ -123,9 +129,29 @@ void ikaopll_audio_wav_open(const char* path, int sample_rate)
 
 void ikaopll_audio_wav_write(int16_t mo_signed, int16_t acc_signed)
 {
-    // ボリューム設定を適用した最終出力はo_ACC_SIGNEDなので、それを使用
-    const int scale = 1;  // o_ACC_SIGNEDは既に適切なスケール
-    int32_t v = (int32_t)acc_signed * scale;
+    if (!g_wav_enabled) return;
+
+    if (acc_signed != 0) {
+        g_wav_nonzero_acc_count++;
+    }
+    if (mo_signed != 0) {
+        g_wav_nonzero_mo_count++;
+    }
+
+    if (!g_wav_force_mo_fallback &&
+        g_wav_nonzero_acc_count == 0 &&
+        g_wav_nonzero_mo_count >= 128) {
+        g_wav_force_mo_fallback = true;
+        std::fprintf(stderr,
+                     "[ikaopll_wrapper] o_ACC_SIGNED appears stuck at 0; falling back to MO*10 for WAV output\n");
+    }
+
+    int32_t v;
+    if (g_wav_force_mo_fallback) {
+        v = static_cast<int32_t>(mo_signed) * 10;
+    } else {
+        v = static_cast<int32_t>(acc_signed);
+    }
     if (v > 32767) v = 32767;
     if (v < -32768) v = -32768;
     g_wav_samples.push_back((int16_t)v);
