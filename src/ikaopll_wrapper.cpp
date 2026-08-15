@@ -183,8 +183,8 @@ void ikaopll_init(void)
     g_top->i_WR_n        = 1;
     g_top->i_A0          = 0;
     g_top->i_D           = 0;
-    g_top->i_ACC_SIGNED_MOVOL = 2;
-    g_top->i_ACC_SIGNED_ROVOL = 3;
+    g_top->i_ACC_SIGNED_MOVOL = 10;
+    g_top->i_ACC_SIGNED_ROVOL = 15;
 
     g_main_time = 0;
     g_emuclk    = 0;
