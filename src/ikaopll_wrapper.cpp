@@ -123,12 +123,9 @@ void ikaopll_audio_wav_open(const char* path, int sample_rate)
 
 void ikaopll_audio_wav_write(int16_t mo_signed, int16_t acc_signed)
 {
-    (void)acc_signed; /* 現在は WAV では未使用（mo_signed からのモノラル出力） */
-    if (!g_wav_enabled) return;
-	/* mo_signed を可聴レベルにスケーリングする。 レンジが小さい場合（例：±512）、16ビットを埋めるように倍率をかける。 */
-	/* オーバーフローを防ぐためにクランプを使う。 */
-    const int scale = 64; // heuristic: 512*64 ~= 32768
-    int32_t v = (int32_t)mo_signed * scale;
+    // ボリューム設定を適用した最終出力はo_ACC_SIGNEDなので、それを使用
+    const int scale = 1;  // o_ACC_SIGNEDは既に適切なスケール
+    int32_t v = (int32_t)acc_signed * scale;
     if (v > 32767) v = 32767;
     if (v < -32768) v = -32768;
     g_wav_samples.push_back((int16_t)v);
