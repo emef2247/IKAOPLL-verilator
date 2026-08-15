@@ -6,7 +6,8 @@
 
 例：
 ```bash
-./tools/create_rtl_dir.sh --fetch-raw https://github.com/ika-musume/IKAOPLL/tree/main
+./tools/create_rtl_dir.sh --fetch-raw https://raw.githubusercontent.com/ika-musume/IKAOPLL/main
+
 ```
 
 ---
@@ -87,7 +88,8 @@ python3 ./tools/mo_changes_to_wav.py -i mo_value_changes.csv -o mo.wav --sampler
 
 1. RTL の準備
 ```bash
-./tools/create_rtl_dir.sh --fetch-raw https://github.com/ika-musume/IKAOPLL/tree/main
+./tools/create_rtl_dir.sh --fetch-raw https://raw.githubusercontent.com/ika-musume/IKAOPLL/main
+
 ```
 
 2. ビルド＋シミュレーション（CSV 生成なし；VCD なし）

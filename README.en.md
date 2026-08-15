@@ -6,7 +6,7 @@ This project expects the IKAOPLL RTL sources to live under the `rtl/` directory.
 
 Example:
 ```bash
-./tools/create_rtl_dir.sh --fetch-raw https://github.com/ika-musume/IKAOPLL/tree/main
+./tools/create_rtl_dir.sh --fetch-raw https://raw.githubusercontent.com/ika-musume/IKAOPLL/main
 ```
 
 ---
@@ -87,7 +87,8 @@ Notes
 
 1. Prepare RTL:
 ```bash
-./tools/create_rtl_dir.sh --fetch-raw https://github.com/ika-musume/IKAOPLL/tree/main
+./tools/create_rtl_dir.sh --fetch-raw https://raw.githubusercontent.com/ika-musume/IKAOPLL/main
+
 ```
 
 2. Build and simulate (no CSV, no VCD):
