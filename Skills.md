@@ -1,7 +1,21 @@
-# Audio Output Verification Skills for PR #5
+# Audio Output Verification Skills
 
 ## Objective
-Verify that PR #5 (IKAOPLL testbench volume initialization fix) correctly produces audio output matching the Y8960_Cartridge reference implementation.
+Verify that the IKAOPLL-verilator audio output matches the Y8960_Cartridge reference implementation.
+
+**Reference Implementation**: https://github.com/hra1129/Y8960_Cartridge/tree/main
+
+---
+
+## Quick Reference: Y8960_Cartridge Volume Settings
+
+From `fpga/Y8960_Cartridge_TangPrimer25K/src/ikaopll_patch/opll.v`:
+```verilog
+.i_ACC_SIGNED_MOVOL  ( 5'd10 ),   // メロディ音量: -16...15 (SIGNED)
+.i_ACC_SIGNED_ROVOL  ( 5'd15 ),   // ドラム音量  : -16...15 (SIGNED)
+```
+
+IKAOPLL-verilator should match these values to produce equivalent audio quality.
 
 ---
 
@@ -11,8 +25,11 @@ Verify that PR #5 (IKAOPLL testbench volume initialization fix) correctly produc
 Execute the IKAOPLL-verilator simulation with debug logging to confirm that volume parameters are initialized and audio samples are produced.
 
 ### Prerequisites
+- RTL ソースの取得:
+  ```bash
+  ./tools/create_rtl_dir.sh --fetch-raw https://raw.githubusercontent.com/ika-musume/IKAOPLL/main
+  ```
 - Build directory cleaned: `rm -rf build/`
-- PR #5 merged into main branch
 
 ### Steps
 
@@ -57,26 +74,28 @@ Generate spectral analysis of the output WAV file to verify audio quality matche
 
 ### Prerequisites
 - Successful simulation run (Skill 1)
-- `ym2413_scale_rom1.vgm.wav` generated in build directory
-- Python with librosa/scipy available
+- `ym2413_scale_rom1.vgm.wav` generated in repository root
+- Python with scipy available
 
 ### Steps
 
 #### 2.1 Verify WAV File Exists
 ```bash
-ls -lh build/ym2413_scale_rom1.vgm.wav
+# WAV file is generated in the repository root (not build/)
+ls -lh ym2413_scale_rom1.vgm.wav
 ```
 
-Expected: File size > 1 MB (for ~4 seconds at 44100 Hz)
+Expected: File size ~300-400 KB (for ~4 seconds at 44100 Hz, 16-bit mono)
+
+**Note**: Output files (CSV/WAV) are generated in the working directory where `build_and_run.sh` is invoked (typically the repository root), not in the `build/` directory.
 
 #### 2.2 Run Spectral Analysis (Python)
 ```python
 import numpy as np
-from scipy import signal
 from scipy.io import wavfile
 
 # Load WAV
-sr, audio = wavfile.read('build/ym2413_scale_rom1.vgm.wav')
+sr, audio = wavfile.read('ym2413_scale_rom1.vgm.wav')
 
 # Compute FFT
 freq = np.fft.fftfreq(len(audio), 1/sr)[:len(audio)//2]
@@ -92,14 +111,14 @@ print(f"Peak magnitude: {mag_db[peak_idx]:.2f} dB")
 print(f"Mean RMS level: {np.sqrt(np.mean(audio**2)):.2f}")
 ```
 
-### Expected Output (PR #5 Correct)
+### Expected Output (Correct Implementation)
 ```
-Peak frequency: ~220-440 Hz  (musical note range)
+Peak frequency: ~220-440 Hz  (musical note range, matching Y8960_Cartridge)
 Peak magnitude: > -20 dB
 Mean RMS level: > 100
 ```
 
-### Expected Output (PR #5 Issue)
+### Expected Output (Issues Present)
 ```
 Peak frequency: > 5000 Hz (high-frequency artifacts)
 Peak magnitude: < -40 dB (very quiet)
@@ -115,13 +134,13 @@ Examine raw CSV audio samples to verify `acc_signed` values reflect volume setti
 
 ### Prerequisites
 - CSV output from Skill 1
-- `build/audio_samples.csv` present
+- `ym2413_scale_rom1.vgm.csv` present in repository root
 
 ### Steps
 
 #### 3.1 Check CSV Format
 ```bash
-head -20 build/audio_samples.csv
+head -20 ym2413_scale_rom1.vgm.csv
 ```
 
 Expected format:
@@ -134,14 +153,15 @@ t_ps,mo_signed,acc_signed
 #### 3.2 Analyze ACC Values
 ```bash
 # Extract first 50 samples, show mo and acc
-awk -F',' 'NR > 1 && NR < 50 {print $2, $3}' build/audio_samples.csv | head -20
+awk -F',' 'NR > 1 && NR < 50 {print $2, $3}' ym2413_scale_rom1.vgm.csv | head -20
 ```
 
 #### 3.3 Python Analysis
 ```python
 import pandas as pd
+import numpy as np
 
-df = pd.read_csv('build/audio_samples.csv')
+df = pd.read_csv('ym2413_scale_rom1.vgm.csv')
 
 # Statistics
 print(f"MO min/max: {df['mo_signed'].min()}/{df['mo_signed'].max()}")
@@ -154,7 +174,7 @@ ratio = df['acc_signed'] / (df['mo_signed'] + 0.0001)
 print(f"Average ACC/MO ratio: {ratio.mean():.2f}")
 ```
 
-### Expected Output (PR #5 Correct)
+### Expected Output (Correct Implementation)
 ```
 MO min/max: -512/511
 ACC min/max: -5120/5110
@@ -163,13 +183,13 @@ ACC RMS: 500+
 Average ACC/MO ratio: ~10.0  ← Shows 10x scaling from MOVOL=10
 ```
 
-### Expected Output (PR #5 Issue - o_ACC_SIGNED=0)
+### Expected Output (Issues Present - o_ACC_SIGNED=0)
 ```
 MO min/max: -512/511
 ACC min/max: 0/0
 ACC mean: 0.0
 ACC RMS: 0.0
-Average ACC/MO ratio: 0.0  ← o_ACC_SIGNED not implemented
+Average ACC/MO ratio: 0.0  ← o_ACC_SIGNED not being used
 ```
 
 ---
@@ -180,7 +200,7 @@ Average ACC/MO ratio: 0.0  ← o_ACC_SIGNED not implemented
 Identify why `o_ACC_SIGNED` may not be working and determine the next fix.
 
 ### Prerequisites
-- Confirmed from Skills 2-3 that `acc=0`
+- Confirmed from Skills 2-3 that `acc=0` consistently
 
 ### Investigation Steps
 
@@ -245,8 +265,122 @@ void ikaopll_audio_wav_write(int16_t mo_signed, int16_t acc_signed)
 ```
 
 #### 5.2 Re-run Skill 1 and Verify
+```bash
+rm -rf build/
+./build_and_run.sh tests/csv/ym2413_scale_rom1.vgm.csv --enable-csv
+```
+
 - Audio should now have proper volume level
 - WAV spectrum should match Y8960_Cartridge reference
+
+#### 5.3 Re-run Skill 2
+Verify that RMS level and peak frequency now match expectations.
+
+---
+
+## Skill 6: Compare with Y8960_Cartridge Reference
+
+### Purpose
+Generate audio from both Y8960_Cartridge and IKAOPLL-verilator using the same test pattern, then compare spectral characteristics to ensure equivalence.
+
+### Prerequisites
+- Y8960_Cartridge repository cloned locally: `git clone https://github.com/hra1129/Y8960_Cartridge.git`
+- Same test input file available or easily creatable
+- Both projects built and runnable
+
+### Steps
+
+#### 6.1 Generate Reference WAV from Y8960_Cartridge
+```bash
+cd ~/Y8960_Cartridge
+# Build and run with same test pattern
+# (Exact procedure depends on Y8960_Cartridge build system)
+# Expected output: reference_audio.wav
+```
+
+#### 6.2 Generate Test WAV from IKAOPLL-verilator
+```bash
+cd ~/IKAOPLL-verilator
+./build_and_run.sh tests/csv/ym2413_scale_rom1.vgm.csv --enable-csv
+# Output: ym2413_scale_rom1.vgm.wav
+```
+
+#### 6.3 Compare Spectral Characteristics
+```python
+import numpy as np
+from scipy.io import wavfile
+import matplotlib.pyplot as plt
+
+# Load both WAVs
+sr_ref, audio_ref = wavfile.read('reference_audio.wav')
+sr_test, audio_test = wavfile.read('ym2413_scale_rom1.vgm.wav')
+
+# Normalize to same length for comparison
+min_len = min(len(audio_ref), len(audio_test))
+audio_ref = audio_ref[:min_len]
+audio_test = audio_test[:min_len]
+
+# Compute FFT
+freq = np.fft.fftfreq(min_len, 1/sr_ref)[:min_len//2]
+mag_ref = np.abs(np.fft.fft(audio_ref))[:min_len//2]
+mag_test = np.abs(np.fft.fft(audio_test))[:min_len//2]
+
+mag_db_ref = 20 * np.log10(mag_ref + 1e-10)
+mag_db_test = 20 * np.log10(mag_test + 1e-10)
+
+# Find peak frequencies
+peak_idx_ref = np.argmax(mag_db_ref[:5000])
+peak_idx_test = np.argmax(mag_db_test[:5000])
+
+peak_freq_ref = freq[peak_idx_ref]
+peak_freq_test = freq[peak_idx_test]
+
+# RMS levels
+rms_ref = np.sqrt(np.mean(audio_ref**2))
+rms_test = np.sqrt(np.mean(audio_test**2))
+
+print(f"=== Y8960_Cartridge Reference ===")
+print(f"Peak frequency: {peak_freq_ref:.2f} Hz")
+print(f"Peak magnitude: {mag_db_ref[peak_idx_ref]:.2f} dB")
+print(f"RMS level: {rms_ref:.2f}")
+
+print(f"\n=== IKAOPLL-verilator ===")
+print(f"Peak frequency: {peak_freq_test:.2f} Hz")
+print(f"Peak magnitude: {mag_db_test[peak_idx_test]:.2f} dB")
+print(f"RMS level: {rms_test:.2f}")
+
+print(f"\n=== Comparison ===")
+freq_diff = abs(peak_freq_test - peak_freq_ref)
+rms_diff_db = 20 * np.log10(rms_test / rms_ref) if rms_ref > 0 else 0
+
+print(f"Peak frequency difference: {freq_diff:.2f} Hz")
+print(f"RMS level difference: {rms_diff_db:.2f} dB")
+
+# Plot
+plt.figure(figsize=(12, 6))
+plt.semilogy(freq, mag_db_ref, label='Y8960_Cartridge (Reference)', linewidth=1)
+plt.semilogy(freq, mag_db_test, label='IKAOPLL-verilator', linewidth=1, alpha=0.7)
+plt.xlabel('Frequency (Hz)')
+plt.ylabel('Magnitude (dB)')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.xlim([0, 5000])
+plt.title('Spectral Comparison: Y8960_Cartridge vs IKAOPLL-verilator')
+plt.savefig('spectrum_comparison.png', dpi=150, bbox_inches='tight')
+plt.show()
+```
+
+### Success Criteria (Match with Y8960_Cartridge)
+- Peak frequency difference: **< ±10 Hz**
+- RMS level difference: **< 3 dB**
+- No unexpected high-frequency artifacts (> 5 kHz) in either output
+- Spectral envelope visually similar
+
+### If Differences Exist
+1. **Peak frequency off by > 10 Hz**: Timing or resampling issue
+2. **RMS level off by > 3 dB**: Volume scaling incorrect
+3. **High-frequency artifacts in IKAOPLL-verilator**: ZOH reconstruction or filtering issue
+4. **High-frequency artifacts in Y8960_Cartridge reference**: May indicate different DAC filter or anti-aliasing
 
 ---
 
@@ -254,8 +388,32 @@ void ikaopll_audio_wav_write(int16_t mo_signed, int16_t acc_signed)
 
 | Condition | Next Action |
 |-----------|------------|
-| `acc_signed != 0` | ✅ PR #5 is working. Verify against reference audio. |
-| `acc_signed = 0` | ⚠️ `o_ACC_SIGNED` not implemented. Apply Skill 5 fallback. |
-| WAV RMS < 50 after fixes | 🔴 Investigate additional scaling or pipeline delays. |
-| Spectrum peak > 5 kHz | 🔴 High-frequency artifacts remain. Check ZOH resampling. |
+| Skill 2-3: Audio quality matches Y8960_Cartridge | ✅ **Implementation is correct** |
+| Skill 2-3: `acc_signed = 0` consistently | ⚠️ `o_ACC_SIGNED` not implemented. Apply Skill 5 fallback. |
+| Skill 6: Peak frequency matches (±10 Hz) | ✅ Timing is correct |
+| Skill 6: RMS level matches (±3 dB) | ✅ Volume scaling is correct |
+| Skill 6: High-frequency artifacts present | 🔴 Investigate ZOH resampling or filtering. Check against reference. |
+| After Skill 5: Quality still poor | 🔴 Issue is deeper than volume scaling. Investigate signal chain. |
 
+---
+
+## Troubleshooting Guide
+
+### Scenario 1: Quality improved after Skill 5 but still < Y8960_Cartridge
+- Check if ROVOL (drum volume) scaling is also correct
+- Verify pipeline/strobing of ACC signal
+- Compare phase relationships between MO and ACC
+
+### Scenario 2: Quality perfect but RMS level off by >3 dB
+- May be due to post-processing (filtering, normalization) in Y8960_Cartridge
+- Document the difference and adjust expectations accordingly
+
+### Scenario 3: High-frequency artifacts persist
+- Check for aliasing in ZOH reconstruction
+- Consider oversampling + lowpass filter as post-processing
+- Use `tools/mo_changes_to_wav_weighted.py` for weighted averaging approach
+
+### Scenario 4: Different peak frequencies despite same input
+- Verify both use same sample rate (44100 Hz)
+- Check if Y8960_Cartridge applies DC removal or envelope shaping
+- Ensure input VGM/CSV is identical in both systems
