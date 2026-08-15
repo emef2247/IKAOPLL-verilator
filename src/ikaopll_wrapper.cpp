@@ -105,14 +105,32 @@ static void eval_tick()
 static bool            g_wav_enabled = false;
 static int             g_wav_sample_rate = 44100;
 static std::vector<int16_t> g_wav_samples;
+struct WavProbeSample {
+    int16_t mo_signed;
+    int16_t acc_signed;
+};
+static std::vector<WavProbeSample> g_wav_probe_samples;
 /* 呼び出し元が指定した出力 WAV パスを保存する（デフォルトは "audio_samples.wav"） */
 static std::string     g_wav_outpath = "audio_samples.wav";
+static uint64_t        g_wav_nonzero_acc_count = 0;
+static uint64_t        g_wav_nonzero_mo_count = 0;
+static bool            g_wav_force_mo_fallback = false;
+static bool            g_wav_probe_done = false;
+/* MOVOL=10 に合わせた手動スケール値（o_ACC_SIGNED が無効な場合のみ使用） */
+static const int       kMoFallbackScale = 10;
+/* ACC が立ち上がる猶予として観測する非ゼロ MO サンプル数 */
+static const uint64_t  kMoFallbackProbeSamples = 8;
 
 void ikaopll_audio_wav_open(const char* path, int sample_rate)
 {
     if (g_wav_enabled) return;
     g_wav_samples.clear();
+    g_wav_probe_samples.clear();
     g_wav_sample_rate = sample_rate > 0 ? sample_rate : 44100;
+    g_wav_nonzero_acc_count = 0;
+    g_wav_nonzero_mo_count = 0;
+    g_wav_force_mo_fallback = false;
+    g_wav_probe_done = false;
     if (path && path[0] != '\0') {
         g_wav_outpath.assign(path);
     } else {
@@ -123,9 +141,61 @@ void ikaopll_audio_wav_open(const char* path, int sample_rate)
 
 void ikaopll_audio_wav_write(int16_t mo_signed, int16_t acc_signed)
 {
-    // ボリューム設定を適用した最終出力はo_ACC_SIGNEDなので、それを使用
-    const int scale = 1;  // o_ACC_SIGNEDは既に適切なスケール
-    int32_t v = (int32_t)acc_signed * scale;
+    if (!g_wav_enabled) return;
+
+    if (acc_signed != 0) {
+        g_wav_nonzero_acc_count++;
+    }
+    if (mo_signed != 0) {
+        g_wav_nonzero_mo_count++;
+    }
+
+    if (!g_wav_force_mo_fallback && !g_wav_probe_done && g_wav_nonzero_acc_count == 0 &&
+        g_wav_probe_samples.size() < kMoFallbackProbeSamples) {
+        g_wav_probe_samples.push_back({mo_signed, acc_signed});
+        return;
+    }
+
+    if (!g_wav_force_mo_fallback && !g_wav_probe_done && g_wav_nonzero_acc_count != 0) {
+        /* probe 期間は acc=0 なので、サンプル数維持のため 0 を詰める */
+        for (size_t i = 0; i < g_wav_probe_samples.size(); ++i) {
+            g_wav_samples.push_back(0);
+        }
+        g_wav_probe_samples.clear();
+        g_wav_probe_done = true;
+    } else if (!g_wav_force_mo_fallback && !g_wav_probe_done &&
+               g_wav_nonzero_acc_count == 0 &&
+               g_wav_nonzero_mo_count >= kMoFallbackProbeSamples) {
+        g_wav_force_mo_fallback = true;
+        std::fprintf(stderr,
+                     "[ikaopll_wrapper] o_ACC_SIGNED appears stuck at 0; falling back to MO*%d for WAV output\n",
+                     kMoFallbackScale);
+
+        for (const auto& probe : g_wav_probe_samples) {
+            int32_t pv = static_cast<int32_t>(probe.mo_signed) * kMoFallbackScale;
+            if (pv > 32767) pv = 32767;
+            if (pv < -32768) pv = -32768;
+            g_wav_samples.push_back(static_cast<int16_t>(pv));
+        }
+        g_wav_probe_samples.clear();
+        g_wav_probe_done = true;
+    } else if (!g_wav_force_mo_fallback && !g_wav_probe_done &&
+               g_wav_nonzero_acc_count == 0 &&
+               !g_wav_probe_samples.empty()) {
+        /* 無音のみで probe が埋まった場合は 0 を確定して進める */
+        for (size_t i = 0; i < g_wav_probe_samples.size(); ++i) {
+            g_wav_samples.push_back(0);
+        }
+        g_wav_probe_samples.clear();
+        g_wav_probe_done = true;
+    }
+
+    int32_t v;
+    if (g_wav_force_mo_fallback) {
+        v = static_cast<int32_t>(mo_signed) * kMoFallbackScale;
+    } else {
+        v = static_cast<int32_t>(acc_signed);
+    }
     if (v > 32767) v = 32767;
     if (v < -32768) v = -32768;
     g_wav_samples.push_back((int16_t)v);
@@ -154,6 +224,7 @@ void ikaopll_audio_wav_close(void)
         }
     }
     g_wav_samples.clear();
+    g_wav_probe_samples.clear();
     g_wav_enabled = false;
     /* 次回の実行に備えて出力パスをデフォルトにリセットする */
     g_wav_outpath.assign("audio_samples.wav");

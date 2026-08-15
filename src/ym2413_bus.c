@@ -63,6 +63,7 @@ static uint64_t g_cluster_last_edge_tps = 0ULL;
 static uint64_t g_audio_sample_period_ps = 0ULL;   /* ps 単位のサンプル周期 */
 static uint64_t g_audio_next_sample_tps = 0ULL;    /* 次サンプルのシミュ時刻 (ps) */
 static int32_t  g_last_acc_signed = 0;             /* ACC の最新値（サンプリングで使うためにキャッシュ） */
+static uint64_t g_audio_debug_print_count = 0ULL;  /* --debug 時のサンプル表示数 */
 
 /* -------------------------------------------------------------------------
  * Debugging / bus access logging state
@@ -360,6 +361,7 @@ void ym2413_bus_debug_open(const char* path)
     g_debug_total_phiM_adapter = 0;
     g_debug_total_phiM_internal = 0;
     g_debug_flag_current_step_from_adapter = 0;
+    g_audio_debug_print_count = 0;
 }
 
 void ym2413_bus_debug_close(void)
@@ -466,6 +468,16 @@ void ym2413_bus_step_phiM_cycles(ym2413_bus_t* bus, uint32_t n_phiM)
                 int16_t mo_signed = ikaopll_get_mo_signed();    /* 例: -512..+511 */
                 /* ACC の最新値も取得 (ストローブで更新されるが最新値を常に読んでおく) */
                 int16_t acc_signed = ikaopll_get_acc_signed();
+
+                if (g_debug_fp && g_audio_debug_print_count < 20) {
+                    fprintf(stderr,
+                            "[DEBUG] sample %" PRIu64 ": t_ps=%" PRIu64 ", mo=%d, acc=%d\n",
+                            g_audio_debug_print_count,
+                            g_audio_next_sample_tps,
+                            (int)mo_signed,
+                            (int)acc_signed);
+                    g_audio_debug_print_count++;
+                }
 
                 /* CSV 出力: 生の整数値を吐く (ポスト処理でスケールや mix を行う想定) */
                 fprintf(g_audio_fp, "%" PRIu64 ",%d,%d\n", g_audio_next_sample_tps, (int)mo_signed, (int)acc_signed);
